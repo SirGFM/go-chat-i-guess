@@ -2,8 +2,10 @@ package main
 
 import (
     "fmt"
-    gows "github.com/gorilla/websocket"
+    "github.com/gobwas/ws"
+    "github.com/gobwas/ws/wsutil"
     "log"
+    "net"
     "net/http"
     "net/url"
     "os"
@@ -19,29 +21,55 @@ type message struct {
     from string
 }
 
+func newMessage(msg string, from string) message {
+    return message {
+        t: time.Now(),
+        msg: msg,
+        from: from,
+    }
+}
+
 type participant struct {
-    conn *gows.Conn
+    conn net.Conn
     name string
     last time.Time
     send chan message
 }
 
 func (p *participant) run() {
+    var buf [1]wsutil.Message
+    defer p.conn.Close()
+
     for {
-        typ, txt, err := p.conn.ReadMessage()
+        buf, err := wsutil.ReadClientMessage(p.conn, buf[:])
         if err != nil {
-            log.Printf("err: %+v", err)
+            log.Printf("Couldn't read: %+v", err)
             return
-        } else if typ != gows.TextMessage {
-            continue
         }
 
-        msg := message {
-            t: time.Now(),
-            msg: string(txt),
-            from: p.name,
+        for i := range buf {
+            data := &(buf[i])
+            switch data.OpCode {
+            case ws.OpClose:
+                log.Printf("Server closed the connection to %s", p.name)
+                return
+            case ws.OpPing:
+                // TODO Lock before ponging
+                err = wsutil.WriteServerMessage(p.conn, ws.OpPong, data.Payload)
+                if err != nil {
+                    log.Printf("Couldn't pong: %+v", err)
+                    return
+                }
+            case ws.OpPong:
+                // Do nothing
+                continue
+            case ws.OpText:
+                // Queue the message
+                p.send <- newMessage(string(data.Payload), p.name)
+            default:
+                log.Printf("Ignoring message of type: %+v", data.OpCode)
+            }
         }
-        p.send <- msg
     }
 }
 
@@ -64,9 +92,10 @@ func (r *room) run() {
                 continue
             }
 
-            err := p.conn.WriteMessage(gows.TextMessage, txt)
+            // TODO Lock before sending the message
+            err := wsutil.WriteServerMessage(p.conn, ws.OpText, txt)
             if err != nil {
-                log.Printf("err: %+v", err)
+                log.Printf("Couldn't send: %+v", err)
                 return
             }
             p.last = msg.t
@@ -77,103 +106,123 @@ func (r *room) run() {
 }
 
 type runningServer struct {
-    httpServer *http.Server
+    conn net.Listener
     rooms map[string]*room
-    upgrader gows.Upgrader
 }
 
-// ServeHTTP is called by Go's http package whenever a new HTTP request arrives
-func (s *runningServer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-    // Normalize and strip the URL from its leading prefix (and slash)
-    resUrl := path.Clean(req.URL.EscapedPath())
-    if len(resUrl) > 0 && resUrl[0] == '/' {
-        // NOTE: The first character must not be a '/' because of the split
-        resUrl = resUrl[1:]
-    } else if len(resUrl) == 1 && resUrl[0] == '.' {
-        // Clean converts an empty path into a single "."
-        resUrl = ""
+func (s *runningServer) handle() {
+    var channel string
+    var username string
+
+    wsUpgrader := ws.Upgrader {
+        OnRequest: func (uri []byte) error {
+            // Normalize and strip the URL from its leading prefix (and slash)
+            resUrl := path.Clean(string(uri))
+            if len(resUrl) > 0 && resUrl[0] == '/' {
+                // NOTE: The first character must not be a '/' because of the split
+                resUrl = resUrl[1:]
+            } else if len(resUrl) == 1 && resUrl[0] == '.' {
+                // Clean converts an empty path into a single ""
+                resUrl = ""
+            }
+
+            // As part of the normalization, unescape each component individually
+            var urlPath []string
+            for _, p := range strings.Split(resUrl, "/") {
+                cleanPath, err := url.PathUnescape(p)
+                if err != nil {
+                    log.Printf("err: %+v", err)
+                    return ws.RejectConnectionError(
+                        ws.RejectionStatus(http.StatusNotFound),
+                        ws.RejectionReason(fmt.Sprintf("handshake error: invalid URI '%s'", string(uri))),
+                    )
+                }
+                urlPath = append(urlPath, cleanPath)
+            }
+
+            if len(urlPath) >= 2 {
+                username = urlPath[len(urlPath)-1]
+                channel = strings.Join(urlPath[:len(urlPath)-1], "|")
+
+                return nil
+            } else {
+                return ws.RejectConnectionError(
+                    ws.RejectionStatus(http.StatusNotFound),
+                    ws.RejectionReason("handshake error: invalid need at least two parts"),
+                )
+            }
+        },
     }
 
-    // As part of the normalization, unescape each component individually
-    var urlPath []string
-    for _, p := range strings.Split(resUrl, "/") {
-        cleanPath, err := url.PathUnescape(p)
+    for {
+        conn, err := s.conn.Accept()
         if err != nil {
-            log.Printf("err: %+v", err)
-            return
+            log.Fatalf("Failed to accept: %+v", err)
         }
-        urlPath = append(urlPath, cleanPath)
-    }
 
-    if len(urlPath) >= 2 {
-        user := urlPath[len(urlPath)-1]
-        roomName := strings.Join(urlPath[:len(urlPath)-1], "|")
+        // Try to update the connection to a websocket connection
+        _, err = wsUpgrader.Upgrade(conn)
+        if err != nil {
+            log.Printf("Not a websocket! %+v", err)
+            conn.Close()
+            continue
+        }
 
-        chatRoom, ok := s.rooms[roomName]
+        // Add the participant to the room (creating it as necessary)
+        chatRoom, ok := s.rooms[channel]
         if !ok {
             chatRoom = &room {
                 newMsg: make(chan message, 1),
-                name: roomName,
+                name: channel,
             }
-            s.rooms[roomName] = chatRoom
+            s.rooms[channel] = chatRoom
             go chatRoom.run()
-        }
-
-        conn, err := s.upgrader.Upgrade(w, req, nil)
-        if err != nil {
-            log.Printf("err: %+v", err)
-            return
         }
 
         p := participant {
             conn: conn,
-            name: user,
+            name: username,
             send: chatRoom.newMsg,
         }
         chatRoom.users = append(chatRoom.users, p)
         go p.run()
 
-        log.Printf("%s joined %s", user, roomName)
+        msg := fmt.Sprintf("%s joined %s", username, channel)
+        log.Printf(msg)
+        chatRoom.newMsg <- newMessage(msg, "")
     }
 }
 
-// Halts the `http.Server`, if still running
+// Halts the server, if still running
 func (s *runningServer) Close() {
-    if s.httpServer != nil {
-        s.httpServer.Close()
-        s.httpServer = nil
+    if s.conn != nil {
+        s.conn.Close()
+        s.conn = nil
     }
-}
-
-func yes(r *http.Request) bool {
-    return true
 }
 
 func main() {
-    var srv runningServer
-
     log.SetFlags(log.Lshortfile | log.Ldate | log.Ltime)
 
-    srv.httpServer = &http.Server {
-        Addr: "0.0.0.0:8888",
-        Handler: &srv,
+    ln, err := net.Listen("tcp", "0.0.0.0:8888")
+    if err != nil {
+        log.Fatalf("Failed to listen: %+v", err)
     }
-    srv.rooms = make(map[string]*room)
-    srv.upgrader = gows.Upgrader {
-        ReadBufferSize:  1024,
-        WriteBufferSize: 1024,
-        CheckOrigin: yes,
+
+    srv := runningServer {
+        conn: ln,
+        rooms: make(map[string]*room),
     }
 
     intHndlr := make(chan os.Signal, 1)
     signal.Notify(intHndlr, os.Interrupt)
 
     go func() {
-        log.Printf("Waiting...")
-        srv.httpServer.ListenAndServe()
+        <-intHndlr
+        log.Printf("Exiting...")
+        srv.Close()
     } ()
 
-    <-intHndlr
-    log.Printf("Exiting...")
-    srv.Close()
+    log.Printf("Waiting...")
+    srv.handle()
 }
