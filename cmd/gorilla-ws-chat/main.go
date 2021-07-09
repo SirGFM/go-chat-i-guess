@@ -133,7 +133,14 @@ func (s *runningServer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
         chatRoom.users = append(chatRoom.users, p)
         go p.run()
 
-        log.Printf("%s joined %s", user, roomName)
+        s := fmt.Sprintf("%s joined %s", user, roomName)
+        log.Printf(s)
+        msg := message {
+            t: time.Now(),
+            msg: s,
+            from: "",
+        }
+        p.send <- msg
     }
 }
 
