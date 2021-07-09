@@ -10,6 +10,7 @@ import (
     "os/signal"
     "path"
     "strings"
+    "sync"
     "time"
 )
 
@@ -19,6 +20,14 @@ type message struct {
     from string
 }
 
+func newMessage(msg string, from string) message {
+    return message {
+        t: time.Now(),
+        msg: msg,
+        from: from,
+    }
+}
+
 type participant struct {
     conn *gows.Conn
     name string
@@ -26,22 +35,34 @@ type participant struct {
     send chan message
 }
 
+func (p *participant) onClose() {
+    closeTxt := fmt.Sprintf("%s is exiting...", p.name)
+    log.Printf("Closing connection with %s", p.name)
+    p.send <- newMessage(closeTxt, "")
+}
+
 func (p *participant) run() {
+    defer p.conn.Close()
+
     for {
         typ, txt, err := p.conn.ReadMessage()
         if err != nil {
             log.Printf("err: %+v", err)
+            p.onClose()
             return
-        } else if typ != gows.TextMessage {
+        }
+
+        switch typ {
+        case gows.CloseMessage:
+            p.onClose()
+            return
+        case gows.TextMessage:
+            break
+        default:
             continue
         }
 
-        msg := message {
-            t: time.Now(),
-            msg: string(txt),
-            from: p.name,
-        }
-        p.send <- msg
+        p.send <- newMessage(string(txt), p.name)
     }
 }
 
@@ -50,6 +71,7 @@ type room struct {
     users []participant
     newMsg chan message
     name string
+    lock sync.Mutex
 }
 
 func (r *room) run() {
@@ -58,8 +80,15 @@ func (r *room) run() {
 
         txt := []byte(fmt.Sprintf("%+v - %s: %s", msg.t, msg.from, msg.msg))
         log.Printf("@%s - %s", r.name, string(txt))
-        for i := range r.users {
+
+        // Manually iterate over the list, since it may change live
+        r.lock.Lock()
+        count := len(r.users)
+        r.lock.Unlock()
+        for i := 0; i < count; i++ {
+            r.lock.Lock()
             p := &(r.users[i])
+            r.lock.Unlock()
             if p.name == msg.from {
                 continue
             }
@@ -67,7 +96,16 @@ func (r *room) run() {
             err := p.conn.WriteMessage(gows.TextMessage, txt)
             if err != nil {
                 log.Printf("err: %+v", err)
-                return
+
+                r.lock.Lock()
+                copy(r.users[i+1:], r.users[i:])
+                r.users = r.users[:len(r.users)-1]
+                r.lock.Unlock()
+
+                // Decrease both the index and the count because of the 'i++'
+                i--
+                count--
+                continue
             }
             p.last = msg.t
         }
@@ -79,6 +117,7 @@ func (r *room) run() {
 type runningServer struct {
     httpServer *http.Server
     rooms map[string]*room
+    roomsLock sync.Mutex
     upgrader gows.Upgrader
 }
 
@@ -109,13 +148,17 @@ func (s *runningServer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
         user := urlPath[len(urlPath)-1]
         roomName := strings.Join(urlPath[:len(urlPath)-1], "|")
 
+        s.roomsLock.Lock()
         chatRoom, ok := s.rooms[roomName]
+        s.roomsLock.Unlock()
         if !ok {
             chatRoom = &room {
                 newMsg: make(chan message, 1),
                 name: roomName,
             }
+            s.roomsLock.Lock()
             s.rooms[roomName] = chatRoom
+            s.roomsLock.Unlock()
             go chatRoom.run()
         }
 
@@ -130,17 +173,14 @@ func (s *runningServer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
             name: user,
             send: chatRoom.newMsg,
         }
+        chatRoom.lock.Lock()
         chatRoom.users = append(chatRoom.users, p)
+        chatRoom.lock.Unlock()
         go p.run()
 
         s := fmt.Sprintf("%s joined %s", user, roomName)
         log.Printf(s)
-        msg := message {
-            t: time.Now(),
-            msg: s,
-            from: "",
-        }
-        p.send <- msg
+        p.send <- newMessage(s, "")
     }
 }
 
