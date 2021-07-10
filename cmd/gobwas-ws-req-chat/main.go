@@ -12,6 +12,7 @@ import (
     "os/signal"
     "path"
     "strings"
+    "sync"
     "time"
 )
 
@@ -78,6 +79,7 @@ type room struct {
     users []participant
     newMsg chan message
     name string
+    lock sync.Mutex
 }
 
 func (r *room) run() {
@@ -86,8 +88,15 @@ func (r *room) run() {
 
         txt := []byte(fmt.Sprintf("%+v - %s: %s", msg.t, msg.from, msg.msg))
         log.Printf("@%s - %s", r.name, string(txt))
-        for i := range r.users {
+
+        // Manually iterate over the list, since it may change live
+        r.lock.Lock()
+        count := len(r.users)
+        r.lock.Unlock()
+        for i := 0; i < count; i++ {
+            r.lock.Lock()
             p := &(r.users[i])
+            r.lock.Unlock()
             if p.name == msg.from {
                 continue
             }
@@ -95,8 +104,17 @@ func (r *room) run() {
             // TODO Lock before sending the message
             err := wsutil.WriteServerMessage(p.conn, ws.OpText, txt)
             if err != nil {
-                log.Printf("Couldn't send: %+v", err)
-                return
+                log.Printf("err: %+v", err)
+
+                r.lock.Lock()
+                copy(r.users[i+1:], r.users[i:])
+                r.users = r.users[:len(r.users)-1]
+                r.lock.Unlock()
+
+                // Decrease both the index and the count because of the 'i++'
+                i--
+                count--
+                continue
             }
             p.last = msg.t
         }
@@ -108,6 +126,7 @@ func (r *room) run() {
 type runningServer struct {
     httpServer *http.Server
     rooms map[string]*room
+    roomsLock sync.Mutex
 }
 
 func (s *runningServer) connChat(w http.ResponseWriter, req *http.Request, channel string, username string) {
@@ -118,13 +137,17 @@ func (s *runningServer) connChat(w http.ResponseWriter, req *http.Request, chann
     }
 
     // Add the participant to the room (creating it as necessary)
+    s.roomsLock.Lock()
     chatRoom, ok := s.rooms[channel]
+    s.roomsLock.Unlock()
     if !ok {
         chatRoom = &room {
             newMsg: make(chan message, 1),
             name: channel,
         }
+        s.roomsLock.Lock()
         s.rooms[channel] = chatRoom
+        s.roomsLock.Unlock()
         go chatRoom.run()
     }
 
@@ -133,7 +156,9 @@ func (s *runningServer) connChat(w http.ResponseWriter, req *http.Request, chann
         name: username,
         send: chatRoom.newMsg,
     }
+    chatRoom.lock.Lock()
     chatRoom.users = append(chatRoom.users, p)
+    chatRoom.lock.Unlock()
     go p.run()
 
     msg := fmt.Sprintf("%s joined %s", username, channel)
