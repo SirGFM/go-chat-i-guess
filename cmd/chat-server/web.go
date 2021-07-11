@@ -19,7 +19,11 @@ func (s *server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
     uri := cleanURL(req.URL)
     log.Printf("%s - %s - %s", req.RemoteAddr, req.Method, uri)
 
-    httpTextReply(http.StatusNotFound, "404 - Nothing to see here...", w)
+    if uri == "chat_page" || uri == "" {
+        serveChatPage(w)
+    } else {
+        httpTextReply(http.StatusNotFound, "404 - Nothing to see here...", w)
+    }
 }
 
 // cleanURL so everything is properly escaped/encoded and so it may be split into each of its components.
