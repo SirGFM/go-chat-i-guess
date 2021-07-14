@@ -148,20 +148,26 @@ func (s *server) getToken(token string) (string, string, error) {
     }
 }
 
-// checkTokens verify, after `tokenCleanupDelay`, whether any token should be removed.
-func (s *server) checkTokens() {
-    for s.running {
-        time.Sleep(s.conf.TokenCleanupDelay)
+// cleanup verify, periodically, whether any object should be removed.
+func (s *server) cleanup() {
+    token := time.NewTicker(s.conf.TokenCleanupDelay)
 
-        s.tokenMutex.Lock()
-        now := time.Now()
-        for key, val := range s.tokens {
-            if now.After(val.deadline) {
-                delete(s.tokens, key)
+    for s.running {
+        select {
+        case <-token.C:
+            // Clean up connection tokens
+            s.tokenMutex.Lock()
+            now := time.Now()
+            for key, val := range s.tokens {
+                if now.After(val.deadline) {
+                    delete(s.tokens, key)
+                }
             }
+            s.tokenMutex.Unlock()
         }
-        s.tokenMutex.Unlock()
     }
+
+    token.Stop()
 }
 
 // NewServerConf create a new chat server, as specified by `conf`.
@@ -176,8 +182,8 @@ func NewServerConf(conf ServerConf) ChatServer {
         running: true,
     }
 
-    // Start the clean up goroutine for expired tokens
-    go s.checkTokens()
+    // Start the clean up goroutine for expired objects
+    go s.cleanup()
 
     return s
 }
