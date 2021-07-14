@@ -8,10 +8,24 @@ import (
 // TestAccessToken check whether the access token is correctly evicted after its
 // deadline and after being used.
 func TestAccessToken(t *testing.T) {
+    const bufSize = 128
     const tokenDeadline = time.Millisecond * 2
     const tokenCleanupDelay = time.Millisecond * 20
 
-    s := NewServerWithTimeout(128, 128, tokenDeadline, tokenCleanupDelay)
+    s := NewServerWithTimeout(bufSize, bufSize, tokenDeadline, tokenCleanupDelay)
+
+    // Check that the server was correctly configured.
+    conf := s.GetConf()
+    if want, got := bufSize, conf.ReadBuf; want != got {
+        t.Errorf("Invalid ReadBuf retrieved: expected '%d' but got '%d'", want, got)
+    } else if want, got := bufSize, conf.WriteBuf; want != got {
+        t.Errorf("Invalid WriteBuf retrieved: expected '%d' but got '%d'", want, got)
+    } else if want, got := tokenDeadline, conf.TokenDeadline; want != got {
+        t.Errorf("Invalid TokenDeadline retrieved: expected '%d' but got '%d'", want, got)
+    } else if want, got := tokenCleanupDelay, conf.TokenCleanupDelay; want != got {
+        t.Errorf("Invalid TokenCleanupDelay retrieved: expected '%d' but got '%d'", want, got)
+    }
+
     // Retrieve a reference to the internal server, to check the token storage.
     _s := s.(*server)
 

@@ -26,13 +26,37 @@ type accessToken struct {
     deadline time.Time
 }
 
-// The chat server.
-type server struct {
+// ServerConf define various parameters that may be used to configure
+// the server.
+type ServerConf struct {
+    // Size for the read buffer on new connections.
+    ReadBuf int
+
+    // Size for the write buffer on new connections.
+    WriteBuf int
+
     // For how long a given token should exist before being used or expiring.
-    tokenDeadline time.Duration
+    TokenDeadline time.Duration
 
     // Delay between executions of the token cleanup routine.
-    tokenCleanupDelay time.Duration
+    TokenCleanupDelay time.Duration
+}
+
+// GetDefaultServerConf retrieve a fully initialized `ServerConf`, with all
+// fields set to some default, and non-zero, value.
+func GetDefaultServerConf() ServerConf {
+    return ServerConf {
+        ReadBuf: 1024,
+        WriteBuf: 1024,
+        TokenDeadline: defTokenDeadline,
+        TokenCleanupDelay: defTokenCleanupDelay,
+    }
+}
+
+// The chat server.
+type server struct {
+    // The server configurations.
+    conf ServerConf
 
     // Every currently active token. The token itself is used as the map's key.
     tokens map[string]*accessToken
@@ -47,6 +71,11 @@ type server struct {
 // The public interfacer of the chat server.
 type ChatServer interface {
     io.Closer
+
+    // GetConf retrieve a copy of the server's configuration. As such,
+    // changing it won't cause any change to the configurations of the
+    // running server.
+    GetConf() ServerConf
 
     // RequestToken generate a token temporarily associating the user identified
     // by `username` may connect to a `channel`.
@@ -64,6 +93,13 @@ func (s *server) Close() error {
     s.running = false
 
     return nil
+}
+
+// GetConf retrieve a copy of the server's configuration. As such,
+// changing it won't cause any change to the configurations of the
+// running server.
+func (s *server) GetConf() ServerConf {
+    return s.conf
 }
 
 // RequestToken generate a token temporarily associating the user identified
@@ -85,7 +121,7 @@ func (s *server) RequestToken(username, channel string) (string, error) {
     value := &accessToken {
         username: username,
         channel: channel,
-        deadline: time.Now().Add(s.tokenDeadline),
+        deadline: time.Now().Add(s.conf.TokenDeadline),
     }
 
     s.tokenMutex.Lock()
@@ -115,7 +151,7 @@ func (s *server) getToken(token string) (string, string, error) {
 // checkTokens verify, after `tokenCleanupDelay`, whether any token should be removed.
 func (s *server) checkTokens() {
     for s.running {
-        time.Sleep(s.tokenCleanupDelay)
+        time.Sleep(s.conf.TokenCleanupDelay)
 
         s.tokenMutex.Lock()
         now := time.Now()
@@ -128,16 +164,16 @@ func (s *server) checkTokens() {
     }
 }
 
-// NewServerWithTimeout create a new chat server with the requested size for the
-// `readBuf` and for the `writeBuf`. Additionally, the access `tokenDeadline`
-// and `tokenCleanupDelay` may be configured.
-func NewServerWithTimeout(readBuf, writeBuf int,
-        tokenDeadline, tokenCleanupDelay time.Duration) ChatServer {
+// NewServerConf create a new chat server, as specified by `conf`.
+//
+// When a new chat server starts, a clean up goroutine is spawned to check
+// and release expired resources periodically. This goroutine is stopped,
+// and every resource is released, when the ChatServer gets `Close()`d.
+func NewServerConf(conf ServerConf) ChatServer {
     s := &server {
+        conf: conf,
         tokens: make(map[string]*accessToken),
         running: true,
-        tokenDeadline: tokenDeadline,
-        tokenCleanupDelay: tokenCleanupDelay,
     }
 
     // Start the clean up goroutine for expired tokens
@@ -146,8 +182,27 @@ func NewServerWithTimeout(readBuf, writeBuf int,
     return s
 }
 
+// NewServerWithTimeout create a new chat server with the requested size for the
+// `readBuf` and for the `writeBuf`. Additionally, the access `tokenDeadline`
+// and `tokenCleanupDelay` may be configured.
+//
+// See `NewServerConf()` for more details.
+func NewServerWithTimeout(readBuf, writeBuf int,
+        tokenDeadline, tokenCleanupDelay time.Duration) ChatServer {
+    conf := ServerConf {
+        ReadBuf: readBuf,
+        WriteBuf: writeBuf,
+        TokenDeadline: tokenDeadline,
+        TokenCleanupDelay: tokenCleanupDelay,
+    }
+
+    return NewServerConf(conf)
+}
+
 // NewServer create a new chat server with the requested size for the `readBuf`
 // and for the `writeBuf`.
+//
+// See `NewServerConf()` for more details.
 func NewServer(readBuf, writeBuf int) ChatServer {
     return NewServerWithTimeout(readBuf, writeBuf, defTokenDeadline,
             defTokenCleanupDelay)
