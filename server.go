@@ -14,6 +14,9 @@ const defTokenDeadline = time.Second * 30
 // Delay between executions of the token cleanup routine.
 const defTokenCleanupDelay = time.Minute * 5
 
+// Delay between executions of the channel cleanup routine.
+const defChannelCleanupDelay = time.Minute * 30
+
 // Ephemeral access token received from an authenticated.
 type accessToken struct {
     // The username for whom the token was generated.
@@ -40,6 +43,9 @@ type ServerConf struct {
 
     // Delay between executions of the token cleanup routine.
     TokenCleanupDelay time.Duration
+
+    // Delay between executions of the channel cleanup routine.
+    ChannelCleanupDelay time.Duration
 }
 
 // GetDefaultServerConf retrieve a fully initialized `ServerConf`, with all
@@ -50,6 +56,7 @@ func GetDefaultServerConf() ServerConf {
         WriteBuf: 1024,
         TokenDeadline: defTokenDeadline,
         TokenCleanupDelay: defTokenCleanupDelay,
+        ChannelCleanupDelay: defChannelCleanupDelay,
     }
 }
 
@@ -57,6 +64,12 @@ func GetDefaultServerConf() ServerConf {
 type server struct {
     // The server configurations.
     conf ServerConf
+
+    // Collection of channels currently active in this server.
+    channels map[string]ChatChannel
+
+    // Synchronizes access to `channels`.
+    chanMutex sync.Mutex
 
     // Every currently active token. The token itself is used as the map's key.
     tokens map[string]*accessToken
@@ -66,6 +79,9 @@ type server struct {
 
     // Whether the chat server is currently running.
     running bool
+
+    // stop receives a new message when the server should get closed.
+    stop chan bool
 }
 
 // The public interfacer of the chat server.
@@ -86,11 +102,26 @@ type ChatServer interface {
     //
     // RequestToken should only fail if it somehow fails to generate a token.
     RequestToken(username, channel string) (string, error)
+
+    // CreateChannel create and start the channel with the given `name`.
+    //
+    // Channels are uniquely identified by their names. Also, the chat
+    // server automatically removes a closed channel, regardless whether
+    // it was manually closed or whether it timed out.
+    CreateChannel(name string) error
+
+    // GetChannel retrieve the channel named `name`.
+    GetChannel(name string) (ChatChannel, error)
+
+    //Connect(w http.ResponseWriter, req *http.Request, channel string
 }
 
 // Clean up every resource used by the chat server.
 func (s *server) Close() error {
-    s.running = false
+    if s.running {
+        s.running = false
+        s.stop <- true
+    }
 
     return nil
 }
@@ -131,6 +162,36 @@ func (s *server) RequestToken(username, channel string) (string, error) {
     return token, nil
 }
 
+// CreateChannel create and start the channel with the given `name`.
+//
+// This shouldn't ever fail, unless there's already a channel with the
+// requested name.
+//
+// See `ChatServer.CreateChannel` for a more complete description.
+func (s *server) CreateChannel(name string) error {
+    s.chanMutex.Lock()
+    defer s.chanMutex.Unlock()
+
+    if _, ok := s.channels[name]; ok {
+        return DuplicatedChannel
+    }
+
+    s.channels[name] = newChannel(name)
+    return nil
+}
+
+// GetChannel retrieve the channel named `name`.
+func (s *server) GetChannel(name string) (ChatChannel, error) {
+    s.chanMutex.Lock()
+    defer s.chanMutex.Unlock()
+
+    if c, ok := s.channels[name]; ok {
+        return c, nil
+    } else {
+        return nil, InvalidChannel
+    }
+}
+
 // getToken consume the given `token`, removing it from the server, and return
 // the associated `username` and `channel`.
 func (s *server) getToken(token string) (string, string, error) {
@@ -151,6 +212,7 @@ func (s *server) getToken(token string) (string, string, error) {
 // cleanup verify, periodically, whether any object should be removed.
 func (s *server) cleanup() {
     token := time.NewTicker(s.conf.TokenCleanupDelay)
+    channel := time.NewTicker(s.conf.ChannelCleanupDelay)
 
     for s.running {
         select {
@@ -164,10 +226,22 @@ func (s *server) cleanup() {
                 }
             }
             s.tokenMutex.Unlock()
+        case <-channel.C:
+            // Clean up channels
+            s.chanMutex.Lock()
+            for key, val := range s.channels {
+                if val.IsClosed() {
+                    delete(s.channels, key)
+                }
+            }
+            s.chanMutex.Unlock()
+        case <-s.stop:
+            // Do nothing and let cleanup exit
         }
     }
 
     token.Stop()
+    channel.Stop()
 }
 
 // NewServerConf create a new chat server, as specified by `conf`.
@@ -178,8 +252,10 @@ func (s *server) cleanup() {
 func NewServerConf(conf ServerConf) ChatServer {
     s := &server {
         conf: conf,
+        channels: make(map[string]ChatChannel),
         tokens: make(map[string]*accessToken),
         running: true,
+        stop: make(chan bool, 1),
     }
 
     // Start the clean up goroutine for expired objects
@@ -195,12 +271,11 @@ func NewServerConf(conf ServerConf) ChatServer {
 // See `NewServerConf()` for more details.
 func NewServerWithTimeout(readBuf, writeBuf int,
         tokenDeadline, tokenCleanupDelay time.Duration) ChatServer {
-    conf := ServerConf {
-        ReadBuf: readBuf,
-        WriteBuf: writeBuf,
-        TokenDeadline: tokenDeadline,
-        TokenCleanupDelay: tokenCleanupDelay,
-    }
+    conf := GetDefaultServerConf()
+    conf.ReadBuf = readBuf
+    conf.WriteBuf = writeBuf
+    conf.TokenDeadline = tokenDeadline
+    conf.TokenCleanupDelay = tokenCleanupDelay
 
     return NewServerConf(conf)
 }

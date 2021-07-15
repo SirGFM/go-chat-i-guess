@@ -82,6 +82,14 @@ func (c *channel) newSystemWhisper(msg, to string) {
     c.newMessage(msg, "", to)
 }
 
+// IsClosed check if the channel is closed.
+//
+// The channel reports itself as being closed as soon as `c.Close()` was
+// first called, regardless of whether or not it's finished running.
+func (c *channel) IsClosed() bool {
+    return atomic.LoadUint32(&c.running) == 0
+}
+
 // waitClient wait until any client connects to the channel and sends their
 // first message. If this doesn't happen in `c.idleTimeout`, this function
 // fails and return with an error.
@@ -106,6 +114,8 @@ func (c *channel) waitClient() error {
         return nil
     case <-timeout.C:
         return IdleChannel
+    case <-c.stop:
+        return ChannelClosed
     }
 }
 
@@ -167,6 +177,9 @@ type ChatChannel interface {
     // setting its `Date` to the current time and setting the message's
     // `Message` and sender (its `From`) as `msg` and `from`, respectively.
     NewBroadcast(msg, from string)
+
+    // IsClosed check if the channel is closed.
+    IsClosed() bool
 
     // TODO Add a function to add new clients.
 }

@@ -71,3 +71,55 @@ func TestAccessToken(t *testing.T) {
         t.Errorf("Invalid error! Expected '%+v' but got '%+v'", want, got)
     }
 }
+
+// TestChannel check whether a channel is correctly evicted after getting
+// closed.
+func TestChannel(t *testing.T) {
+    conf := GetDefaultServerConf()
+    conf.ChannelCleanupDelay = time.Millisecond * 10
+
+    s := NewServerConf(conf)
+
+    // Try to retrieve a non-existing channel.
+    _, err := s.GetChannel("chan")
+    if err == nil {
+        t.Error("Successfully got a non-existing channel")
+    } else if got, ok := err.(ChatError); !ok {
+        t.Errorf("Invalid error! Expected a 'ChatError' but got '%+v'", err)
+    } else if want := InvalidChannel; want != got {
+        t.Errorf("Invalid error! Expected '%+v' but got '%+v'", want, got)
+    }
+
+    // Create a channel, check that it's unique and try to retrieve it.
+    err = s.CreateChannel("chan")
+    if err != nil {
+        t.Errorf("Failed to create a channel: %+v", err)
+    }
+    err = s.CreateChannel("chan")
+    if err == nil {
+        t.Error("Successfully created a duplicated channel")
+    } else if got, ok := err.(ChatError); !ok {
+        t.Errorf("Invalid error! Expected a 'ChatError' but got '%+v'", err)
+    } else if want := DuplicatedChannel; want != got {
+        t.Errorf("Invalid error! Expected '%+v' but got '%+v'", want, got)
+    }
+
+    c, err := s.GetChannel("chan")
+    if err != nil {
+        t.Errorf("Couldn't get the created channel: %+v", err)
+    }
+
+    // Check that the channel gets evicted after its timeout.
+    c.Close()
+    time.Sleep(conf.ChannelCleanupDelay + conf.ChannelCleanupDelay / 2)
+    _, err = s.GetChannel("chan")
+    if err == nil {
+        t.Error("Successfully got an expired channel")
+    } else if got, ok := err.(ChatError); !ok {
+        t.Errorf("Invalid error! Expected a 'ChatError' but got '%+v'", err)
+    } else if want := InvalidChannel; want != got {
+        t.Errorf("Invalid error! Expected '%+v' but got '%+v'", want, got)
+    }
+
+    s.Close()
+}
