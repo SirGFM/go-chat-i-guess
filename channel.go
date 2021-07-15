@@ -199,7 +199,7 @@ func newChannel(name string) ChatChannel {
         recv: make(chan *message),
         idleTimeout: defIdleTimeout,
         running: 1,
-        stop: make(chan bool),
+        stop: make(chan bool, 1),
     }
 
     go c.run()
