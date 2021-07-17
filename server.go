@@ -80,8 +80,8 @@ type server struct {
     // Whether the chat server is currently running.
     running bool
 
-    // stop receives a new message when the server should get closed.
-    stop chan bool
+    // stop signals, by getting closed, that the server should get closed.
+    stop chan struct{}
 }
 
 // The public interfacer of the chat server.
@@ -120,7 +120,7 @@ type ChatServer interface {
 func (s *server) Close() error {
     if s.running {
         s.running = false
-        s.stop <- true
+        close(s.stop)
     }
 
     return nil
@@ -255,7 +255,7 @@ func NewServerConf(conf ServerConf) ChatServer {
         channels: make(map[string]ChatChannel),
         tokens: make(map[string]*accessToken),
         running: true,
-        stop: make(chan bool, 1),
+        stop: make(chan struct{}),
     }
 
     // Start the clean up goroutine for expired objects

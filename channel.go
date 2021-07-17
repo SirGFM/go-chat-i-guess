@@ -44,8 +44,8 @@ type channel struct {
     // Whether the channel is currently running.
     running uint32
 
-    // stop receives a new message when the channel should get closed.
-    stop chan bool
+    // stop signals, by getting closed, that the channel should get closed.
+    stop chan struct{}
 }
 
 // newMessage queue a new message, setting its `Date` to the current time
@@ -161,7 +161,7 @@ func (c *channel) Close() error {
     // returns true, the swap happened and thus this is the first time
     // that `c.Close()` was called.
     if atomic.CompareAndSwapUint32(&c.running, 1, 0) {
-        c.stop <- true
+        close(c.stop)
 
         // TODO Clean any other resources.
     }
@@ -199,7 +199,7 @@ func newChannel(name string) ChatChannel {
         recv: make(chan *message),
         idleTimeout: defIdleTimeout,
         running: 1,
-        stop: make(chan bool, 1),
+        stop: make(chan struct{}),
     }
 
     go c.run()
