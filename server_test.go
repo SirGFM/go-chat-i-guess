@@ -1,8 +1,10 @@
 package go_chat_i_guess
 
 import (
+    "strings"
     "testing"
     "time"
+    "runtime"
 )
 
 // TestAccessToken check whether the access token is correctly evicted after its
@@ -119,6 +121,123 @@ func TestChannel(t *testing.T) {
         t.Errorf("Invalid error! Expected a 'ChatError' but got '%+v'", err)
     } else if want := InvalidChannel; want != got {
         t.Errorf("Invalid error! Expected '%+v' but got '%+v'", want, got)
+    }
+
+    s.Close()
+}
+
+type expectedMsg struct {
+    conn *mockConn
+    name string
+    msg string
+}
+
+type expectedReceiver struct {
+    conn *mockConn
+    name string
+}
+
+// TestConn check whether messages are correctly sent to/from users.
+func TestConn(t *testing.T) {
+    const u1 = "user1"
+    const u2 = "user2"
+    const cn = "chan"
+
+    conf := GetDefaultServerConf()
+    conf.ChannelCleanupDelay = time.Millisecond * 5
+
+    // Create connections to be used by clients
+    c1 := NewMockConn()
+    _c1 := c1.(*mockConn)
+    c2 := NewMockConn()
+    _c2 := c2.(*mockConn)
+
+    s := NewServerConf(conf)
+
+    // Create a channel, connect a user and check that the channel doesn't
+    // get evicted after the timeout
+    err := s.CreateChannel(cn)
+    if err != nil {
+        t.Errorf("Failed to create a channel: %+v", err)
+    }
+
+    tk, err := s.RequestToken(u1, cn)
+    if err != nil {
+        t.Errorf("Failed to create a connection token for %s and %s: %+v", u1, c1, err)
+    }
+    err = s.Connect(tk, c1)
+    if err != nil {
+        t.Errorf("Failed to connect %s to %s: %+v", u1, c1, err)
+    }
+
+    time.Sleep(conf.ChannelCleanupDelay + conf.ChannelCleanupDelay / 2)
+    _, err = s.GetChannel(cn)
+    if err != nil {
+        t.Error("Channel timedout!")
+    }
+
+    // Chech that u1 receive the message about themselves joining
+    m, err := _c1.TestRecv(time.Millisecond * 5)
+    if err != nil {
+        t.Errorf("%s failed to detected that %s joined %s: %+v", u1, u1, cn, err)
+    } else if !strings.Contains(m, u1) {
+        t.Errorf("Message does not say that %s joined", u1)
+    }
+
+    // Connect another user, so they may communicate
+    tk, err = s.RequestToken(u2, cn)
+    if err != nil {
+        t.Errorf("Failed to create a connection token for %s and %s: %+v", u2, c2, err)
+    }
+    err = s.Connect(tk, c2)
+    if err != nil {
+        t.Errorf("Failed to connect %s to %s: %+v", u2, c2, err)
+    }
+
+    // Check that both users received a message about u2 joining
+    receivers := []expectedReceiver {
+        { _c1, u1 },
+        { _c2, u2 },
+    }
+    for _, recv := range receivers {
+        msg, err := recv.conn.TestRecv(time.Millisecond * 5)
+        if err != nil {
+            t.Errorf("%s failed to detected that %s joined %s: %+v", recv.name, u2, cn, err)
+        } else if !strings.Contains(msg, u2) {
+            t.Errorf("Message does not say that %s joined\n\tGot: %s", u2, msg)
+        }
+    }
+
+    // Send a few messages and check that they arrive on both ends,
+    // sequentially.
+    //
+    // Text: Jabberwocky by Lewis Carroll.
+    input := []expectedMsg {
+        { conn: _c1, name: u1, msg: "Twas brillig, and the slithy toves" },
+        { conn: _c1, name: u1, msg: "Did gyre and gimble in the wabe;" },
+        { conn: _c2, name: u2, msg: "All mimsy were the borogoves," },
+        { conn: _c1, name: u1, msg: "And the mome raths outgrabe." },
+    }
+    for _, in := range input {
+        err := in.conn.TestSend(in.msg)
+        if err != nil {
+            t.Errorf("Failed to send the message '%s' from %s: %+v", in.msg, in.name, err)
+        }
+        // Let other goroutines execute, so we don't throttle the server
+        // and send things out of order.
+        runtime.Gosched()
+    }
+    for _, in := range input {
+        for _, recv := range receivers {
+            msg, err := recv.conn.TestRecv(time.Millisecond * 5)
+            if err != nil {
+                t.Errorf("%s failed to receive the message '%s' from %s: %+v", recv.name, in.msg, in.name, err)
+            } else if !strings.Contains(msg, in.name) {
+                t.Errorf("Message does not say it was sent by %s:\n\tgot: %s", in.name, msg)
+            } else if !strings.Contains(msg, in.msg) {
+                t.Errorf("Message does not contain the expected text:\n\twant: %s\n\tgot: %s", in.msg, msg)
+            }
+        }
     }
 
     s.Close()

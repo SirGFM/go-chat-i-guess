@@ -16,6 +16,12 @@ const (
     InvalidChannel
     // The channel was closed before the operation completed.
     ChannelClosed
+    // The requesting user is already connected to the channel
+    UserAlreadyConnected
+    // The connection was closed
+    ConnEOF
+    // A test connection timed out
+    TestTimeout
 )
 
 func (c ChatError) Error() string {
@@ -30,6 +36,12 @@ func (c ChatError) Error() string {
         return "Invalid Channel"
     case ChannelClosed:
         return "The channel was closed before the operation completed"
+    case UserAlreadyConnected:
+        return "The requesting user is already connected to the channel"
+    case ConnEOF:
+        return "The connection was closed"
+    case TestTimeout:
+        return "A test connection timed out"
     default:
         return "Unknown error"
     }

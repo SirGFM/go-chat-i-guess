@@ -2,7 +2,9 @@ package go_chat_i_guess
 
 import (
     "io"
+    "log"
     "time"
+    "sync"
     "sync/atomic"
 )
 
@@ -26,6 +28,17 @@ type message struct {
     To string `json:-`
 }
 
+// Encode the message into a string that may be sent to users.
+func (m *message) Encode() string {
+    // XXX: Properly encode the message
+    t := m.Date.Format("2006-01-02 - 15:04:05 (-0700)")
+    u := ""
+    if len(m.From) > 0 {
+        u = m.From + ": "
+    }
+    return t + " > " + u + m.Message
+}
+
 // A chat channel, to which users may connect to.
 type channel struct {
     // name of this channel.
@@ -40,6 +53,12 @@ type channel struct {
     // idleTimeout after which this channel is automatically closed, if no
     // user connected to it.
     idleTimeout time.Duration
+
+    // Collection of users currently active in this chat room.
+    users map[string]*user
+
+    // lock fields that could be accessed concurrently.
+    lockUsers sync.Mutex
 
     // Whether the channel is currently running.
     running uint32
@@ -109,13 +128,32 @@ func (c *channel) waitClient() error {
             <-timeout.C
         }
 
-        // Also, since this was the first message, simply log it.
-        c.log = append(c.log, msg)
+        // Re-send this message, so the connecting user may see it.
+        c.recv <- msg
         return nil
     case <-timeout.C:
         return IdleChannel
     case <-c.stop:
         return ChannelClosed
+    }
+}
+
+// messageUser send `msgStr` to the specified user `u`.
+//
+// If the channel fails to send the message to the user, the user gets
+// removed from the channel. Therefore, the users container must have
+// been properly synchronized before calling this.
+func (c *channel) messageUserUsafe(u *user, msgStr string) {
+    err := u.SendStr(msgStr)
+    if err != nil {
+        username := u.GetName()
+        if err == ConnEOF {
+            c.newSystemBroadcast(username + " exited.")
+        } else if err != nil {
+            log.Printf("Couldn't send a message to %s on %s: %+v",
+                    username, c.name, err)
+        }
+        delete(c.users, username)
     }
 }
 
@@ -146,13 +184,64 @@ func (c *channel) run() {
             break
         }
 
-        c.log = append(c.log, msg)
+        // XXX: Optionally, parse messages
 
-        // TODO Broadcast the message to every client.
+        if len(msg.To) == 0 {
+            c.log = append(c.log, msg)
+        }
 
-        // TODO If a client was removed, check whether this was the last
-        // client and, in that case, wait for another connection.
+        msgStr := msg.Encode()
+
+        // Broadcast the message to every client. Alternatively, if the
+        // message was directed to a specific user, send them the message
+        // and skip everything else.
+        c.lockUsers.Lock()
+
+        if len(msg.To) > 0 {
+            u := c.users[msg.To]
+            c.messageUserUsafe(u, msgStr)
+        } else {
+            for k := range c.users {
+                u := c.users[k]
+                c.messageUserUsafe(u, msgStr)
+            }
+        }
+        numUsers := len(c.users)
+
+        c.lockUsers.Unlock()
+
+        // If every client disconnected, wait for another connection.
+        if numUsers == 0 {
+            err = c.waitClient()
+            if err != nil {
+                c.Close()
+                return
+            }
+        }
     }
+}
+
+// ConnectClient add a new client to the channel.
+//
+// It's entirely up to the caller to initialize the connection used by
+// this client, for example upgrading a HTTP request to a WebSocket
+// connection.
+//
+// The `channel` do properly synchronize this function, so it may be
+// called by different goroutines concurrently.
+func (c *channel) ConnectClient(username string, conn Conn) error {
+    u := newUser(username, c, conn)
+
+    c.lockUsers.Lock()
+    defer c.lockUsers.Unlock()
+    if _, ok := c.users[username]; ok {
+        return UserAlreadyConnected
+    }
+
+    c.users[username] = u
+    c.newSystemBroadcast(username + " entered " + c.name +"!")
+
+    return nil
 }
 
 // Close the channel, remove every client and stop the goroutine.
@@ -163,7 +252,12 @@ func (c *channel) Close() error {
     if atomic.CompareAndSwapUint32(&c.running, 1, 0) {
         close(c.stop)
 
-        // TODO Clean any other resources.
+        c.lockUsers.Lock()
+        for k := range c.users {
+            c.users[k].Close()
+            delete(c.users, k)
+        }
+        c.lockUsers.Unlock()
     }
 
     return nil
@@ -181,7 +275,17 @@ type ChatChannel interface {
     // IsClosed check if the channel is closed.
     IsClosed() bool
 
-    // TODO Add a function to add new clients.
+    // ConnectClient add a new client to the channel.
+    //
+    // It's entirely up to the caller to initialize the connection used by
+    // this client, for example upgrading a HTTP request to a WebSocket
+    // connection.
+    //
+    // The `channel` do properly synchronize this function, so it may be
+    // called by different goroutines concurrently.
+    //
+    // On error, `conn` is left unchanged and must be closed by the caller.
+    ConnectClient(username string, conn Conn) error
 }
 
 // newChannel create a new ChatChannel named `name`.
@@ -198,6 +302,7 @@ func newChannel(name string) ChatChannel {
         name: name,
         recv: make(chan *message, 8),
         idleTimeout: defIdleTimeout,
+        users: make(map[string]*user),
         running: 1,
         stop: make(chan struct{}),
     }

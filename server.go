@@ -113,7 +113,11 @@ type ChatServer interface {
     // GetChannel retrieve the channel named `name`.
     GetChannel(name string) (ChatChannel, error)
 
-    //Connect(w http.ResponseWriter, req *http.Request, channel string
+    // Connect a user to a channel, previously associated to `token`, using
+    // `conn` to communicate with this user.
+    //
+    // On error, the token must be re-generated.
+    Connect(token string, conn Conn) error
 }
 
 // Clean up every resource used by the chat server.
@@ -207,6 +211,24 @@ func (s *server) getToken(token string) (string, string, error) {
     } else {
         return "", "", InvalidToken
     }
+}
+
+// Connect a user to a channel, previously associated to `token`, using
+// `conn` to communicate with this user.
+//
+// On error, the token must be re-generated.
+func (s *server) Connect(token string, conn Conn) error {
+    username, channelName, err := s.getToken(token)
+    if err != nil {
+        return err
+    }
+
+    c, err := s.GetChannel(channelName)
+    if err != nil {
+        return err
+    }
+
+    return c.ConnectClient(username, conn)
 }
 
 // cleanup verify, periodically, whether any object should be removed.
