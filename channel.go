@@ -196,7 +196,7 @@ type ChatChannel interface {
 func newChannel(name string) ChatChannel {
     c := &channel {
         name: name,
-        recv: make(chan *message),
+        recv: make(chan *message, 8),
         idleTimeout: defIdleTimeout,
         running: 1,
         stop: make(chan struct{}),
