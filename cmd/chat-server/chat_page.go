@@ -32,6 +32,7 @@ const chat_page = `<html>
             }
             input.text {
                 margin-left: 1em;
+                margin-right: 1em;
                 height: 2em;
                 font-size: large;
             }
@@ -95,11 +96,40 @@ const chat_page = `<html>
                     ws = null;
                 }
 
-                appendMsg('<p> Now talking on ' + channel + '! </p>');
+                let xhr = new XMLHttpRequest();
+                xhr.open("POST", '/new_token/' + channel + '/' + username, true);
+                xhr.addEventListener("loadend", function (e) {
+                    // 200 == OK
+                    if (e.target.status == 200) {
+                        tk = e.target.response;
 
-                ws = new WebSocket('ws://' + window.location.host + '/chat/'+channel+'/'+username)
-                ws.addEventListener('message', wsRecv)
-                ws.addEventListener('close', wsClose)
+                        document.cookie = 'X-ChatToken=' + tk
+
+                        proto = 'ws'
+                        if (window.location.protocol.startsWith('https')) {
+                            proto = 'wss'
+                        }
+
+                        ws = new WebSocket(proto + '://' + window.location.host + '/chat')
+                        ws.addEventListener('message', wsRecv)
+                        ws.addEventListener('close', wsClose)
+
+                        appendMsg('<p> Now talking on ' + channel + '! </p>');
+
+                        document.cookie = 'X-ChatToken=XXXXXXXX'
+                    }
+                    else {
+                        appendMsg('<p> Error: ' + e.target.response + '! </p>');
+                    }
+                });
+                xhr.addEventListener("error", function (e) {
+                    appendMsg('<p> Error: ' + e.target + '! </p>');
+                });
+                xhr.addEventListener("loadstart", _ignore);
+                xhr.addEventListener("load", _ignore);
+                xhr.addEventListener("progress", _ignore);
+
+                xhr.send({});
             }
 
             let send = function() {
@@ -111,9 +141,36 @@ const chat_page = `<html>
                 }
 
                 ws.send(msg);
-                appendMsg('<p> ' + username + ' - ' + msg + ' </p>');
+                appendMsg('<p> <small> just sent: ' + username + ' - ' + msg + ' </small> </p>');
 
                 mfield.value = '';
+            }
+
+            let _ignore = function(e) {}
+
+            let create_channel = function() {
+                let cfield = document.getElementById('channel');
+                channel = cfield.value;
+
+                let xhr = new XMLHttpRequest();
+                xhr.open("POST", '/new_channel/' + channel, true);
+                xhr.addEventListener("loadend", function (e) {
+                    // 204 == No Content
+                    if (e.target.status == 204) {
+                        appendMsg('<p> Channel "' + channel + '" created successfully! </p>');
+                    }
+                    else {
+                        appendMsg('<p> Error: ' + e.target.response + '! </p>');
+                    }
+                });
+                xhr.addEventListener("error", function (e) {
+                    appendMsg('<p> Error: ' + e.target + '! </p>');
+                });
+                xhr.addEventListener("loadstart", _ignore);
+                xhr.addEventListener("load", _ignore);
+                xhr.addEventListener("progress", _ignore);
+
+                xhr.send({});
             }
 
             let on_boot = function (e) {
@@ -132,12 +189,11 @@ const chat_page = `<html>
         <div>
             <label for='channel'> Channel: </label>
             <input class='text' type='text' id='channel' name='channel'>
+            <input class='button' onclick="create_channel();" type="button" value="Create Channel">
         </div>
         <div>
             <label for='username'> Username: </label>
             <input class='text' type='text' id='username' name='username'>
-        </div>
-        <div>
             <input class='button' onclick="connect();" type="button" value="Connect">
         </div>
 
