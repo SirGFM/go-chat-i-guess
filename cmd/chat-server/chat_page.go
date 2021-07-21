@@ -115,8 +115,6 @@ const chat_page = `<html>
                         ws.addEventListener('close', wsClose);
 
                         appendMsg('<p> Now talking on ' + channel + '! </p>');
-
-                        document.cookie = 'X-ChatToken=XXXXXXXX'
                     }
                     else {
                         appendMsg('<p> Error: ' + e.target.response + '! </p>');
