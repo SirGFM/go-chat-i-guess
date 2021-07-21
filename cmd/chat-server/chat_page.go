@@ -103,16 +103,16 @@ const chat_page = `<html>
                     if (e.target.status == 200) {
                         tk = e.target.response;
 
-                        document.cookie = 'X-ChatToken=' + tk
+                        document.cookie = 'X-ChatToken=' + tk;
 
-                        proto = 'ws'
+                        proto = 'ws';
                         if (window.location.protocol.startsWith('https')) {
-                            proto = 'wss'
+                            proto = 'wss';
                         }
 
-                        ws = new WebSocket(proto + '://' + window.location.host + '/chat')
-                        ws.addEventListener('message', wsRecv)
-                        ws.addEventListener('close', wsClose)
+                        ws = new WebSocket(proto + '://' + window.location.host + '/chat');
+                        ws.addEventListener('message', wsRecv);
+                        ws.addEventListener('close', wsClose);
 
                         appendMsg('<p> Now talking on ' + channel + '! </p>');
 
