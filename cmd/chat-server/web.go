@@ -74,11 +74,11 @@ func (s *server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
             }
 
             // On success, the upgraded request will be handled by the chat server
-            err = s.chat.Connect(tk, conn)
+            err = s.chat.ConnectAndWait(tk, conn)
             if err != nil {
                 // Can't do HTTP anymore as the connection was upgraded to a websocket
                 conn.Close()
-                log.Printf("%s - %s - %s - Couldn't connect to the chat room", req.RemoteAddr, req.Method, uri)
+                log.Printf("%s - %s - %s - Couldn't connect to the chat room (%s)", req.RemoteAddr, req.Method, uri, tk)
             }
         } else {
             httpTextReply(http.StatusNotFound, "404 - Nothing to see here...", w)

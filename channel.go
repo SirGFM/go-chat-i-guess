@@ -230,7 +230,7 @@ func (c *channel) run() {
 // The `channel` do properly synchronize this function, so it may be
 // called by different goroutines concurrently.
 func (c *channel) ConnectClient(username string, conn Conn) error {
-    u := newUser(username, c, conn)
+    u := newUserBg(username, c, conn)
 
     c.lockUsers.Lock()
     defer c.lockUsers.Unlock()
@@ -240,6 +240,35 @@ func (c *channel) ConnectClient(username string, conn Conn) error {
 
     c.users[username] = u
     c.newSystemBroadcast(username + " entered " + c.name +"!")
+
+    return nil
+}
+
+// ConnectClient add a new client to the channel and blocks until the
+// client closes the connection to the server.
+//
+// The `channel` does properly synchronize this function, so it may be
+// called by different goroutines concurrently.
+//
+// On error, `conn` is left unchanged and must be closed by the caller.
+//
+// Differently from `ConnectClient`, this function handles messages
+// from the remote client in the calling goroutine. This may be
+// advantageous if the external server already spawns a new goroutine
+// to handle each new connection.
+func (c *channel) ConnectClientAndWait(username string, conn Conn) error {
+    u := newUser(username, c, conn)
+
+    c.lockUsers.Lock()
+    if _, ok := c.users[username]; ok {
+        c.lockUsers.Unlock()
+        return UserAlreadyConnected
+    }
+    c.users[username] = u
+    c.lockUsers.Unlock()
+
+    c.newSystemBroadcast(username + " entered " + c.name +"!")
+    u.RunAndWait()
 
     return nil
 }
@@ -281,11 +310,25 @@ type ChatChannel interface {
     // this client, for example upgrading a HTTP request to a WebSocket
     // connection.
     //
-    // The `channel` do properly synchronize this function, so it may be
+    // The `channel` does properly synchronize this function, so it may be
     // called by different goroutines concurrently.
     //
     // On error, `conn` is left unchanged and must be closed by the caller.
     ConnectClient(username string, conn Conn) error
+
+    // ConnectClient add a new client to the channel and blocks until the
+    // client closes the connection to the server.
+    //
+    // The `channel` does properly synchronize this function, so it may be
+    // called by different goroutines concurrently.
+    //
+    // On error, `conn` is left unchanged and must be closed by the caller.
+    //
+    // Differently from `ConnectClient`, this function handles messages
+    // from the remote client in the calling goroutine. This may be
+    // advantageous if the external server already spawns a new goroutine
+    // to handle each new connection.
+    ConnectClientAndWait(username string, conn Conn) error
 }
 
 // newChannel create a new ChatChannel named `name`.

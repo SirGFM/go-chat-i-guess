@@ -118,6 +118,16 @@ type ChatServer interface {
     //
     // On error, the token must be re-generated.
     Connect(token string, conn Conn) error
+
+    // ConnectAndWait connect a user to a channel, previously associated to
+    // `token`, using `conn` to communicate with this user.
+    //
+    // Differently from `Connect`, this blocks until `conn` gets closed.
+    // This may be usefull if the called already spawns a new goroutine to
+    // handle each new incoming connection.
+    //
+    // On error, the token must be re-generated.
+    ConnectAndWait(token string, conn Conn) error
 }
 
 // Clean up every resource used by the chat server.
@@ -229,6 +239,28 @@ func (s *server) Connect(token string, conn Conn) error {
     }
 
     return c.ConnectClient(username, conn)
+}
+
+// ConnectAndWait connect a user to a channel, previously associated to
+// `token`, using `conn` to communicate with this user.
+//
+// Differently from `Connect`, this blocks until `conn` gets closed.
+// This may be usefull if the called already spawns a new goroutine to
+// handle each new incoming connection.
+//
+// On error, the token must be re-generated.
+func (s *server) ConnectAndWait(token string, conn Conn) error {
+    username, channelName, err := s.getToken(token)
+    if err != nil {
+        return err
+    }
+
+    c, err := s.GetChannel(channelName)
+    if err != nil {
+        return err
+    }
+
+    return c.ConnectClientAndWait(username, conn)
 }
 
 // cleanup verify, periodically, whether any object should be removed.

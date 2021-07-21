@@ -76,22 +76,45 @@ func (u *user) Close() error {
     return nil
 }
 
-// newUser create a new user named `name`, connected to `channel` and
+// RunAndWait handle requests send from the remote client in a blocking
+// manner, until the connection gets closed.
+//
+// This is useful when the server (HTTP, TCP etc) that is running the Chat
+// Server already spawns a new goroutine for each received connection. In
+// this scenario, instead of calling `newUserBg()` and spawning yet another
+// goroutine, it's possible to call `newUser()` followed by `RunAndWait()`.
+//
+// The calling `user` will be closed when this function returns.
+func (u *user) RunAndWait() {
+    defer u.Close()
+
+    u.run()
+}
+
+// newUserBg create a new user named `name`, connected to `channel` and
 // receiving and sending messages to `conn`.
 //
 // `newUser()` executes a new goroutine to handle messages received by the
 // user, forwarding those message to the channel. To stop this goroutine
 // and clean up its resources, call `c.Close()`.
+func newUserBg(name string, channel ChatChannel, conn Conn) *user {
+    u := newUser(name, channel, conn)
+
+    go u.run()
+
+    return u
+}
+
+// newUser create a new user named `name`, connected to `channel` and
+// receiving and sending messages to `conn`.
+//
+//
 func newUser(name string, channel ChatChannel, conn Conn) *user {
-    u := &user {
+    return &user {
         name: name,
         last: time.Now(),
         channel: channel,
         conn: conn,
         running: 1,
     }
-
-    go u.run()
-
-    return u
 }
