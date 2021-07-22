@@ -22,7 +22,7 @@ func (c *gwsConn) Close() error {
 
 // Recv blocks until a new message was received.
 func (c *gwsConn) Recv() (string, error) {
-    for {
+    for c.conn != nil {
         typ, txt, err := c.conn.ReadMessage()
         if err != nil {
             c.Close()
@@ -39,11 +39,16 @@ func (c *gwsConn) Recv() (string, error) {
             continue
         }
     }
+
+    return "", gochat.ConnEOF
 }
 
 // SendStr send `msg`, previously formatted by the caller.
 func (c *gwsConn) SendStr(msg string) error {
-    // TODO: Check EOF
+    if c.conn == nil {
+        return gochat.ConnEOF
+    }
+
     return c.conn.WriteMessage(gows.TextMessage, []byte(msg))
 }
 
