@@ -87,17 +87,17 @@ func (c *channel) NewBroadcast(msg, from string) {
     c.newMessage(msg, from, "")
 }
 
-// newSystemBroadcast queue a new system message (i.e., a message without
+// NewSystemBroadcast queue a new system message (i.e., a message without
 // a sender), setting its `Date` to the current time and setting
 // `Message` to `msg`.
-func (c *channel) newSystemBroadcast(msg string) {
+func (c *channel) NewSystemBroadcast(msg string) {
     c.newMessage(msg, "", "")
 }
 
-// newSystemBroadcast queue a new system message (i.e., a message without
-// a sender) to a specific receiver, setting its `Date` to the current time
+// NewSystemWhisper queue a new system message (i.e., a message without a
+// sender) to a specific receiver, setting its `Date` to the current time
 // and setting `Message` to `msg`.
-func (c *channel) newSystemWhisper(msg, to string) {
+func (c *channel) NewSystemWhisper(msg, to string) {
     c.newMessage(msg, "", to)
 }
 
@@ -148,7 +148,7 @@ func (c *channel) messageUserUsafe(u *user, msgStr string) {
     if err != nil {
         username := u.GetName()
         if err == ConnEOF {
-            c.newSystemBroadcast(username + " exited.")
+            c.NewSystemBroadcast(username + " exited.")
         } else if err != nil {
             log.Printf("Couldn't send a message to %s on %s: %+v",
                     username, c.name, err)
@@ -239,7 +239,7 @@ func (c *channel) ConnectClient(username string, conn Conn) error {
     }
 
     c.users[username] = u
-    c.newSystemBroadcast(username + " entered " + c.name +"!")
+    c.NewSystemBroadcast(username + " entered " + c.name +"!")
 
     return nil
 }
@@ -267,7 +267,7 @@ func (c *channel) ConnectClientAndWait(username string, conn Conn) error {
     c.users[username] = u
     c.lockUsers.Unlock()
 
-    c.newSystemBroadcast(username + " entered " + c.name +"!")
+    c.NewSystemBroadcast(username + " entered " + c.name +"!")
     u.RunAndWait()
 
     return nil
@@ -300,6 +300,16 @@ type ChatChannel interface {
     // setting its `Date` to the current time and setting the message's
     // `Message` and sender (its `From`) as `msg` and `from`, respectively.
     NewBroadcast(msg, from string)
+
+    // NewSystemBroadcast queue a new system message (i.e., a message
+    // without a sender), setting its `Date` to the current time and
+    // setting `Message` to `msg`.
+    NewSystemBroadcast(msg string)
+
+    // NewSystemWhisper queue a new system message (i.e., a message without
+    // a sender) to a specific receiver, setting its `Date` to the current
+    // time and setting `Message` to `msg`.
+    NewSystemWhisper(msg, to string)
 
     // IsClosed check if the channel is closed.
     IsClosed() bool
