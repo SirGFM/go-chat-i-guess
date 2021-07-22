@@ -101,6 +101,24 @@ func (c *channel) NewSystemWhisper(msg, to string) {
     c.newMessage(msg, "", to)
 }
 
+// Name retrieve the channel's name.
+func (c *channel) Name() string {
+    return c.name
+}
+
+// GetUsers retrieve the list of connected users in this channel. If
+// `list` is supplied, the users are appended to the that list, so be
+// sure to empty it before calling this function.
+func (c *channel) GetUsers(list []string) []string {
+    c.lockUsers.Lock()
+    for k := range c.users {
+        list = append(list, k)
+    }
+    c.lockUsers.Unlock()
+
+    return list
+}
+
 // IsClosed check if the channel is closed.
 //
 // The channel reports itself as being closed as soon as `c.Close()` was
@@ -295,6 +313,14 @@ func (c *channel) Close() error {
 // The public interface for a chat channel.
 type ChatChannel interface {
     io.Closer
+
+    // Name retrieve the channel's name.
+    Name() string
+
+    // GetUsers retrieve the list of connected users in this channel. If
+    // `list` is supplied, the users are appended to the that list, so be
+    // sure to empty it before calling this function.
+    GetUsers(list []string) []string
 
     // NewBroadcast queue a new broadcast message from a specific sender,
     // setting its `Date` to the current time and setting the message's

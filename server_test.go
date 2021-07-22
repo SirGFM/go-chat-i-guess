@@ -240,5 +240,26 @@ func TestConn(t *testing.T) {
         }
     }
 
+    // Check the channel's name and the list of users
+    c, err := s.GetChannel(cn)
+    if err != nil {
+        t.Errorf("Couldn't retrieve the channel: %+v", err)
+    } else if want, got := cn, c.Name(); want != got {
+        t.Errorf("Channel has an invalid name! Expected '%s' but got '%s'", want, got)
+    }
+    userList := c.GetUsers(nil)
+    for _, want := range []string { u1, u2 } {
+        var found bool
+        for _, got := range userList {
+            if want == got {
+                found = true
+                break
+            }
+        }
+        if !found {
+            t.Errorf("User '%s' isn't on the user list (%+v)!", want, userList)
+        }
+    }
+
     s.Close()
 }
