@@ -30,7 +30,6 @@ type message struct {
 
 // Encode the message into a string that may be sent to users.
 func (m *message) Encode() string {
-    // XXX: Properly encode the message
     t := m.Date.Format("2006-01-02 - 15:04:05 (-0700)")
     u := ""
     if len(m.From) > 0 {
@@ -39,10 +38,33 @@ func (m *message) Encode() string {
     return t + " > " + u + m.Message
 }
 
+// MessageEncoder encodes a given message into the string that will be
+// sent by the channel.
+type MessageEncoder interface {
+    // Encode the message described in the parameter into the string that
+    // will be sent to the channel.
+    //
+    // Returning the empty string will cancel sending the message, which
+    // may be useful for command processing. It may also be used to reply
+    // directly, and exclusively, to the sender after processing the
+    // message.
+    //
+    // `from` is set internally by the `ChatChannel`, based on the `Conn`
+    // that received this message and forwarded it to the server. Using it
+    // to determine whether the requesting user is allowed to do some
+    // operation should be safe, as long as users are properly
+    // authenticated before generating their connection token.
+    Encode(channel ChatChannel, date time.Time, msg, from, to string) string
+}
+
 // A chat channel, to which users may connect to.
 type channel struct {
     // name of this channel.
     name string
+
+    // encoder optionally encodes/process messages. If not defined,
+    // `message.Encode()` is used instead.
+    encoder MessageEncoder
 
     // recv messages sent from a remote client.
     recv chan *message
@@ -202,13 +224,23 @@ func (c *channel) run() {
             break
         }
 
-        // XXX: Optionally, parse messages
-
         if len(msg.To) == 0 {
             c.log = append(c.log, msg)
         }
 
-        msgStr := msg.Encode()
+        var msgStr string
+        if c.encoder == nil {
+            msgStr = msg.Encode()
+        } else {
+            // Encode the received message using the application supplied
+            // encoder. The application may cancel forwarding this message,
+            // by returning the empty string.
+            msgStr = c.encoder.Encode(c, msg.Date, msg.Message, msg.From,
+                    msg.To)
+            if len(msgStr) == 0 {
+                continue
+            }
+        }
 
         // Broadcast the message to every client. Alternatively, if the
         // message was directed to a specific user, send them the message
@@ -369,6 +401,9 @@ type ChatChannel interface {
 
 // newChannel create a new ChatChannel named `name`.
 //
+// `encoder` may optionally be supplied to process and encode messages
+// received by the channel.
+//
 // `newChannel()` executes a new goroutine to handle messages received by
 // the channel. To stop this goroutine and clean up its resources, call
 // `c.Close()`.
@@ -376,9 +411,10 @@ type ChatChannel interface {
 // Regardless, if every client disconnects and the channel is left idle for
 // long enough (more specifically, for `defIdleTimeout`), this goroutine
 // will automatically stop.
-func newChannel(name string) ChatChannel {
+func newChannel(name string, encoder MessageEncoder) ChatChannel {
     c := &channel {
         name: name,
+        encoder: encoder,
         recv: make(chan *message, 8),
         idleTimeout: defIdleTimeout,
         users: make(map[string]*user),

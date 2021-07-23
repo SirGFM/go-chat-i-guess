@@ -9,6 +9,7 @@ import (
     "net/url"
     "path"
     "strings"
+    "time"
 )
 
 type server struct {
@@ -128,6 +129,34 @@ func (s *server) Close() error {
     return nil
 }
 
+// Encode the received message.
+func (s *server) Encode(channel gochat.ChatChannel, date time.Time, msg,
+        from, to string) string {
+
+    // Try to parse the message as a command.
+    switch msg {
+    case "/users":
+        // Return the list of users only for the requesting user.
+        msg := "Users in channel '" + channel.Name() + "': "
+        for _, name := range channel.GetUsers(nil) {
+            msg += name + ", "
+        }
+        // Remove the trailing ", ".
+        msg = msg[:len(msg)-2]
+        channel.NewSystemWhisper(msg, from)
+        // Don't broadcast this message.
+        return ""
+    }
+
+    // Otherwise, use the default encoding.
+    t := date.Format("2006-01-02 - 15:04:05 (-0700)")
+    u := ""
+    if len(from) > 0 {
+        u = from + ": "
+    }
+    return t + " > " + u + msg
+}
+
 // runWeb server into a goroutine
 func runWeb(args Args) io.Closer {
     var srv server
@@ -136,7 +165,9 @@ func runWeb(args Args) io.Closer {
         Addr: fmt.Sprintf("%s:%d", args.IP, args.Port),
         Handler: &srv,
     }
-    srv.chat = gochat.NewServerConf(gochat.GetDefaultServerConf())
+    conf := gochat.GetDefaultServerConf()
+    conf.Encoder = &srv
+    srv.chat = gochat.NewServerConf(conf)
     setUpgrader(args)
 
     go func() {

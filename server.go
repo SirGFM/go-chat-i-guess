@@ -46,6 +46,10 @@ type ServerConf struct {
 
     // Delay between executions of the channel cleanup routine.
     ChannelCleanupDelay time.Duration
+
+    // Encoder optionally processes and encodes messages received by this
+    // server's channels.
+    Encoder MessageEncoder
 }
 
 // GetDefaultServerConf retrieve a fully initialized `ServerConf`, with all
@@ -190,7 +194,7 @@ func (s *server) CreateChannel(name string) error {
         return DuplicatedChannel
     }
 
-    s.channels[name] = newChannel(name)
+    s.channels[name] = newChannel(name, s.conf.Encoder)
     return nil
 }
 

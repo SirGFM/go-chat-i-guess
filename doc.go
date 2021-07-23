@@ -81,5 +81,11 @@ connection, it's also used to identify the user within the `ChatChannel`.
 This may either be done by using a transport that maintains a connection
 (TCP, WebSocket etc) or by manually associating this `Conn` to its
 associated user.
+
+By default, a Chat Server simply broadcasts the received messages as
+strings. This behaviour may be expanded by defining a `Encoder` in the
+server's `ServerConf`. This `MessageEncoder` could be used to process
+messages (for example, listing the users in a given channel) and/or to
+encode the message into a JSON object.
 */
 package go_chat_i_guess
