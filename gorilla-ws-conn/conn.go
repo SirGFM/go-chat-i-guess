@@ -116,11 +116,17 @@ func (c *gwsConn) send(mType int, data []byte) error {
 
 // SendStr send `msg`, previously formatted by the caller.
 func (c *gwsConn) SendStr(msg string) error {
+    mType := gows.TextMessage
+
     if c.conn == nil {
         return gochat.ConnEOF
+    } else if len(msg) == 0 {
+        // In case of empty message, just change it into a pong, to check
+        // if the remote endpoint is alive.
+        mType = gows.PongMessage
     }
 
-    return c.send(gows.TextMessage, []byte(msg))
+    return c.send(mType, []byte(msg))
 }
 
 // detectTimeout wait some time checking if the connection timed out.

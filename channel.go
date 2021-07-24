@@ -85,6 +85,10 @@ type channel struct {
     // Whether the channel is currently running.
     running uint32
 
+    // idle reports that the channel has been idle for too long, and should
+    // check its users.
+    idle *time.Ticker
+
     // stop signals, by getting closed, that the channel should get closed.
     stop chan struct{}
 }
@@ -149,35 +153,6 @@ func (c *channel) IsClosed() bool {
     return atomic.LoadUint32(&c.running) == 0
 }
 
-// waitClient wait until any client connects to the channel and sends their
-// first message. If this doesn't happen in `c.idleTimeout`, this function
-// fails and return with an error.
-//
-// `waitClient()` should only be called when the channel has no clients
-// connected and from the channel's main goroutine. This way, this is
-// guaranteed to return on the first client connection and message, which
-// doesn't need to be broadcast.
-func (c *channel) waitClient() error {
-    timeout := time.NewTimer(c.idleTimeout)
-
-    select {
-    case msg := <-c.recv:
-        // Since a message was received before the idle timeout,
-        // clear the timer before exiting.
-        if !timeout.Stop() {
-            <-timeout.C
-        }
-
-        // Re-send this message, so the connecting user may see it.
-        c.recv <- msg
-        return nil
-    case <-timeout.C:
-        return IdleChannel
-    case <-c.stop:
-        return ChannelClosed
-    }
-}
-
 // messageUser send `msgStr` to the specified user `u`.
 //
 // If the channel fails to send the message to the user, the user gets
@@ -205,12 +180,6 @@ func (c *channel) messageUserUsafe(u *user, msgStr string) {
 // left idle for long enough (more specifically, for `defIdleTimeout`),
 // this goroutine will automatically stop.
 func (c *channel) run() {
-    err := c.waitClient()
-    if err != nil {
-        c.Close()
-        return
-    }
-
     for {
         select {
         case <-c.stop:
@@ -218,9 +187,16 @@ func (c *channel) run() {
             // but `c.Close()` may safelly be called multiple times.
             c.Close()
             return
+        case <-c.idle.C:
+            c.checkConnections()
         case msg := <-c.recv:
             c.handleMessage(msg)
         }
+
+        // Reset the idle timeout on any active on the channel. If this
+        // activity was caused by a timeout, this will simply delay the
+        // timeout by a bit.
+        c.idle.Reset(c.idleTimeout)
     }
 }
 
@@ -259,18 +235,25 @@ func (c *channel) handleMessage(msg *message) {
             c.messageUserUsafe(u, msgStr)
         }
     }
-    numUsers := len(c.users)
 
     c.lockUsers.Unlock()
+}
 
-    // If every client disconnected, wait for another connection.
-    if numUsers == 0 {
-        err := c.waitClient()
-        if err != nil {
-            c.Close()
-            return
-        }
+// checkConnections send a dummy message to every connect user to check if
+// they are still active, and to remove inactive users.
+func (c *channel) checkConnections() {
+    log.Printf("timed out: checking connectivity...")
+    c.lockUsers.Lock()
+    for k := range c.users {
+        u := c.users[k]
+        c.messageUserUsafe(u, "")
     }
+
+    // If there's no user after a timeout, simply close the channel.
+    if len(c.users) == 0 {
+        c.Close()
+    }
+    c.lockUsers.Unlock()
 }
 
 // ConnectClient add a new client to the channel.
@@ -421,6 +404,7 @@ func newChannel(name string, encoder MessageEncoder) ChatChannel {
         idleTimeout: defIdleTimeout,
         users: make(map[string]*user),
         running: 1,
+        idle: time.NewTicker(defIdleTimeout),
         stop: make(chan struct{}),
     }
 

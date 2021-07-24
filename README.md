@@ -7,6 +7,10 @@ connect. Both the channel and users must be uniquely identified by their
 name, although the calling application is responsible by authenticating if
 those are valid values.
 
+# Prerequisites
+
+* Go 1.15 (this package hasn't been made in a module, so more recent versions probably won't work)
+
 # Documentation
 
 The documentation may be generated using `godoc`:

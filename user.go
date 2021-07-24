@@ -14,6 +14,9 @@ type Conn interface {
     Recv() (string, error)
 
     // SendStr send `msg`, previously formatted by the caller.
+    //
+    // Note that the server may send an empty message to check if this
+    // connection is still active.
     SendStr(msg string) error
 }
 
