@@ -212,61 +212,63 @@ func (c *channel) run() {
     }
 
     for {
-        var msg *message
-
         select {
         case <-c.stop:
             // The channel should be closed when it receives a `c.stop`,
             // but `c.Close()` may safelly be called multiple times.
             c.Close()
             return
-        case msg = <-c.recv:
-            break
+        case msg := <-c.recv:
+            c.handleMessage(msg)
         }
+    }
+}
 
-        if len(msg.To) == 0 {
-            c.log = append(c.log, msg)
+// handleMessage encode the received message and broadcast it to every
+// connected user.
+func (c *channel) handleMessage(msg *message) {
+    if len(msg.To) == 0 {
+        c.log = append(c.log, msg)
+    }
+
+    var msgStr string
+    if c.encoder == nil {
+        msgStr = msg.Encode()
+    } else {
+        // Encode the received message using the application supplied
+        // encoder. The application may cancel forwarding this message,
+        // by returning the empty string.
+        msgStr = c.encoder.Encode(c, msg.Date, msg.Message, msg.From,
+                msg.To)
+        if len(msgStr) == 0 {
+            return
         }
+    }
 
-        var msgStr string
-        if c.encoder == nil {
-            msgStr = msg.Encode()
-        } else {
-            // Encode the received message using the application supplied
-            // encoder. The application may cancel forwarding this message,
-            // by returning the empty string.
-            msgStr = c.encoder.Encode(c, msg.Date, msg.Message, msg.From,
-                    msg.To)
-            if len(msgStr) == 0 {
-                continue
-            }
-        }
+    // Broadcast the message to every client. Alternatively, if the
+    // message was directed to a specific user, send them the message
+    // and skip everything else.
+    c.lockUsers.Lock()
 
-        // Broadcast the message to every client. Alternatively, if the
-        // message was directed to a specific user, send them the message
-        // and skip everything else.
-        c.lockUsers.Lock()
-
-        if len(msg.To) > 0 {
-            u := c.users[msg.To]
+    if len(msg.To) > 0 {
+        u := c.users[msg.To]
+        c.messageUserUsafe(u, msgStr)
+    } else {
+        for k := range c.users {
+            u := c.users[k]
             c.messageUserUsafe(u, msgStr)
-        } else {
-            for k := range c.users {
-                u := c.users[k]
-                c.messageUserUsafe(u, msgStr)
-            }
         }
-        numUsers := len(c.users)
+    }
+    numUsers := len(c.users)
 
-        c.lockUsers.Unlock()
+    c.lockUsers.Unlock()
 
-        // If every client disconnected, wait for another connection.
-        if numUsers == 0 {
-            err = c.waitClient()
-            if err != nil {
-                c.Close()
-                return
-            }
+    // If every client disconnected, wait for another connection.
+    if numUsers == 0 {
+        err := c.waitClient()
+        if err != nil {
+            c.Close()
+            return
         }
     }
 }
