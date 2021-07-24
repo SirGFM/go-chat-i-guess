@@ -44,6 +44,14 @@ type ServerConf struct {
     // Delay between executions of the token cleanup routine.
     TokenCleanupDelay time.Duration
 
+    // For how long a given channel may stay idle (without receiving any
+    // connection). After this timeout expires, the channel sends a message
+    // to every user, to check whether they are still connected.
+    //
+    // If no user is connected to the channel when it times out, the
+    // channel will be automatically closed!
+    ChannelIdleTimeout time.Duration
+
     // Delay between executions of the channel cleanup routine.
     ChannelCleanupDelay time.Duration
 
@@ -60,6 +68,7 @@ func GetDefaultServerConf() ServerConf {
         WriteBuf: 1024,
         TokenDeadline: defTokenDeadline,
         TokenCleanupDelay: defTokenCleanupDelay,
+        ChannelIdleTimeout: defIdleTimeout,
         ChannelCleanupDelay: defChannelCleanupDelay,
     }
 }
@@ -194,7 +203,7 @@ func (s *server) CreateChannel(name string) error {
         return DuplicatedChannel
     }
 
-    s.channels[name] = newChannel(name, s.conf.Encoder)
+    s.channels[name] = newChannel(name, s.conf)
     return nil
 }
 

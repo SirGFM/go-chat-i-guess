@@ -386,8 +386,8 @@ type ChatChannel interface {
 
 // newChannel create a new ChatChannel named `name`.
 //
-// `encoder` may optionally be supplied to process and encode messages
-// received by the channel.
+// An `Encoder` may optionally be supplied on `conf` to process and encode
+// messages received by the channel.
 //
 // `newChannel()` executes a new goroutine to handle messages received by
 // the channel. To stop this goroutine and clean up its resources, call
@@ -396,15 +396,15 @@ type ChatChannel interface {
 // Regardless, if every client disconnects and the channel is left idle for
 // long enough (more specifically, for `defIdleTimeout`), this goroutine
 // will automatically stop.
-func newChannel(name string, encoder MessageEncoder) ChatChannel {
+func newChannel(name string, conf ServerConf) ChatChannel {
     c := &channel {
         name: name,
-        encoder: encoder,
+        encoder: conf.Encoder,
         recv: make(chan *message, 8),
-        idleTimeout: defIdleTimeout,
+        idleTimeout: conf.ChannelIdleTimeout,
         users: make(map[string]*user),
         running: 1,
-        idle: time.NewTicker(defIdleTimeout),
+        idle: time.NewTicker(conf.ChannelIdleTimeout),
         stop: make(chan struct{}),
     }
 
