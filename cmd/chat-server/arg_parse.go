@@ -18,6 +18,8 @@ type Args struct {
     WriteSize int
     // IgnoreOrigin and accept connections from any source (mostly for development)
     IgnoreOrigin bool
+    // Debug the chat server by logging everything
+    Debug bool
 }
 
 // parseArgs either from the command line or from the supplied JSON file.
@@ -31,6 +33,7 @@ func parseArgs() Args {
     const defaultReadSize = 1024
     const defaultWriteSize = 1024
     const defaultIgnoreOrigin = true
+    const defaultDebug = true
 
     flag.StringVar(&args.IP, "IP", defaultIP, "IP on which the server will accept connections")
     flag.IntVar(&args.Port, "Port", defaultPort, "Port on which the server will accept connections")
@@ -38,6 +41,7 @@ func parseArgs() Args {
     flag.IntVar(&args.WriteSize, "WriteSize", defaultWriteSize, "WriteSize allocated for gorilla-ws's buffer when a new connection is accepted")
     flag.BoolVar(&args.IgnoreOrigin, "IgnoreOrigin", defaultIgnoreOrigin, "IgnoreOrigin and accept connections from any source (mostly for development)")
     flag.StringVar(&confFile, "confFile", "", "JSON file with the configuration options. May be overriden by other CLI arguments")
+    flag.BoolVar(&args.Debug, "Debug", defaultDebug, "Debug the chat server by logging everything")
     flag.Parse()
 
     if len(confFile) != 0 {
@@ -90,6 +94,10 @@ func parseArgs() Args {
                 val, _ := get.Get().(bool)
                 log.Printf("Overriding JSON's IgnoreOrigin (%+v) with CLI's value (%+v)", jsonArgs.IgnoreOrigin, val)
                 jsonArgs.IgnoreOrigin = val
+            case "Debug":
+                val, _ := get.Get().(bool)
+                log.Printf("Overriding JSON's Debug (%+v) with CLI's value (%+v)", jsonArgs.Debug, val)
+                jsonArgs.Debug = val
             }
         })
 
@@ -102,6 +110,7 @@ func parseArgs() Args {
     log.Printf("  - ReadSize: %+v", args.ReadSize)
     log.Printf("  - WriteSize: %+v", args.WriteSize)
     log.Printf("  - IgnoreOrigin: %+v", args.IgnoreOrigin)
+    log.Printf("  - Debug: %+v", args.Debug)
 
     return args
 }

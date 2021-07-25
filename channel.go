@@ -1,7 +1,9 @@
 package go_chat_i_guess
 
 import (
+    "encoding/hex"
     "io"
+    "hash/crc32"
     "log"
     "time"
     "sync"
@@ -36,6 +38,23 @@ func (m *message) Encode() string {
         u = m.From + ": "
     }
     return t + " > " + u + m.Message
+}
+
+// getUID generate a unique identifier for the message.
+//
+// This should only be used for debugging purposes, as performance isn't
+// the primary concern of this function.
+func (m *message) getUID() string {
+    hasher := crc32.NewIEEE()
+
+    date, _ := m.Date.MarshalBinary()
+    hasher.Write(date)
+    hasher.Write([]byte(m.From))
+    hasher.Write([]byte(m.To))
+    hasher.Write([]byte(m.Message))
+
+    uid := hasher.Sum(nil)
+    return hex.EncodeToString(uid)
 }
 
 // MessageEncoder encodes a given message into the string that will be
@@ -91,6 +110,13 @@ type channel struct {
 
     // stop signals, by getting closed, that the channel should get closed.
     stop chan struct{}
+
+    // logger used by the channel to report events. If this is nil, no
+    // message shall be logged!
+    logger *log.Logger
+
+    // Whether debug messages should be logged.
+    debugLog bool
 }
 
 // newMessage queue a new message, setting its `Date` to the current time
@@ -101,6 +127,11 @@ func (c *channel) newMessage(msg, from, to string) {
         Message: msg,
         From: from,
         To: to,
+    }
+    if c.debugLog && c.logger != nil {
+        c.logger.Printf("[DEBUG] go_chat_i_guess/channel: Sending message...\n\tchannel: \"%s\"\n\tdate: \"%+v\"\n\tfrom: \"%s\"\n\tto: \"%s\"\n\tmessage: \"%s\"\n\tuid: \"%s\"",
+                c.name, packet.Date, packet.From, packet.To,
+                packet.Message, packet.getUID())
     }
 
     c.recv <- packet
@@ -163,10 +194,16 @@ func (c *channel) messageUserUsafe(u *user, msgStr string) {
     if err != nil {
         username := u.GetName()
         if err == ConnEOF {
+            if c.debugLog && c.logger != nil {
+                c.logger.Printf("[DEBUG] go_chat_i_guess/channel: Connection to user was closed.\n\tchannel: \"%s\"\n\tusername: \"%s\"",
+                        c.name, username)
+            }
             c.NewSystemBroadcast(username + " exited.")
         } else if err != nil {
-            log.Printf("Couldn't send a message to %s on %s: %+v",
-                    username, c.name, err)
+            if c.logger != nil {
+                c.logger.Printf("[ERROR] go_chat_i_guess/channel: Couldn't send a message to the user.\n\tchannel: \"%s\"\n\tusername: \"%s\"\n\terror: %+v",
+                        c.name, username, err)
+            }
         }
         delete(c.users, username)
     }
@@ -203,6 +240,16 @@ func (c *channel) run() {
 // handleMessage encode the received message and broadcast it to every
 // connected user.
 func (c *channel) handleMessage(msg *message) {
+    // uid is only used for debug printing.
+    var uid string
+
+    if c.debugLog && c.logger != nil {
+        uid = msg.getUID()
+
+        c.logger.Printf("[DEBUG] go_chat_i_guess/channel: Message received.\n\tchannel: \"%s\"\n\tdate: \"%+v\"\n\tfrom: \"%s\"\n\tto: \"%s\"\n\tmessage: \"%s\"\n\tuid: \"%s\"",
+                c.name, msg.Date, msg.From, msg.To, msg.Message, uid)
+    }
+
     if len(msg.To) == 0 {
         c.log = append(c.log, msg)
     }
@@ -217,6 +264,11 @@ func (c *channel) handleMessage(msg *message) {
         msgStr = c.encoder.Encode(c, msg.Date, msg.Message, msg.From,
                 msg.To)
         if len(msgStr) == 0 {
+            if c.debugLog && c.logger != nil {
+                c.logger.Printf("[DEBUG] go_chat_i_guess/channel: Message was filtered out!\n\tuid: \"%s\"",
+                        uid)
+            }
+
             return
         }
     }
@@ -242,7 +294,11 @@ func (c *channel) handleMessage(msg *message) {
 // checkConnections send a dummy message to every connect user to check if
 // they are still active, and to remove inactive users.
 func (c *channel) checkConnections() {
-    log.Printf("timed out: checking connectivity...")
+    if c.debugLog && c.logger != nil {
+        c.logger.Printf("[DEBUG] go_chat_i_guess/channel: Idle timeout; checking connectivity...\n\tchannel: \"%s\"",
+                c.name)
+    }
+
     c.lockUsers.Lock()
     for k := range c.users {
         u := c.users[k]
@@ -251,6 +307,11 @@ func (c *channel) checkConnections() {
 
     // If there's no user after a timeout, simply close the channel.
     if len(c.users) == 0 {
+        if c.logger != nil {
+            c.logger.Printf("[INFO] go_chat_i_guess/channel: Closing inactive channel...\n\tchannel: \"%s\"",
+                    c.name)
+        }
+
         c.Close()
     }
     c.lockUsers.Unlock()
@@ -265,11 +326,15 @@ func (c *channel) checkConnections() {
 // The `channel` do properly synchronize this function, so it may be
 // called by different goroutines concurrently.
 func (c *channel) ConnectClient(username string, conn Conn) error {
-    u := newUserBg(username, c, conn)
+    u := newUserBg(username, c, conn, c.logger, c.debugLog)
 
     c.lockUsers.Lock()
     defer c.lockUsers.Unlock()
     if _, ok := c.users[username]; ok {
+        if c.logger != nil {
+            c.logger.Printf("[ERROR] go_chat_i_guess/channel: User tried to connect more than once to a channel.\n\tchannel: \"%s\"\n\tuser: \"%s\"",
+                    c.name, username)
+        }
         return UserAlreadyConnected
     }
 
@@ -292,11 +357,16 @@ func (c *channel) ConnectClient(username string, conn Conn) error {
 // advantageous if the external server already spawns a new goroutine
 // to handle each new connection.
 func (c *channel) ConnectClientAndWait(username string, conn Conn) error {
-    u := newUser(username, c, conn)
+    u := newUser(username, c, conn, c.logger, c.debugLog)
 
     c.lockUsers.Lock()
     if _, ok := c.users[username]; ok {
         c.lockUsers.Unlock()
+
+        if c.logger != nil {
+            c.logger.Printf("[ERROR] go_chat_i_guess/channel: User tried to connect more than once to a channel.\n\tchannel: \"%s\"\n\tuser: \"%s\"",
+                    c.name, username)
+        }
         return UserAlreadyConnected
     }
     c.users[username] = u
@@ -314,6 +384,10 @@ func (c *channel) Close() error {
     // returns true, the swap happened and thus this is the first time
     // that `c.Close()` was called.
     if atomic.CompareAndSwapUint32(&c.running, 1, 0) {
+        if c.debugLog && c.logger != nil {
+            c.logger.Printf("[DEBUG] go_chat_i_guess/channel: Closing channel...\n\tchannel: \"%s\"",
+                    c.name)
+        }
         close(c.stop)
 
         c.lockUsers.Lock()
@@ -406,6 +480,8 @@ func newChannel(name string, conf ServerConf) ChatChannel {
         running: 1,
         idle: time.NewTicker(conf.ChannelIdleTimeout),
         stop: make(chan struct{}),
+        logger: conf.Logger,
+        debugLog: conf.DebugLog,
     }
 
     go c.run()

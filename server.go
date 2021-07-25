@@ -4,6 +4,7 @@ import (
     crand "crypto/rand"
     "encoding/hex"
     "io"
+    "log"
     "time"
     "sync"
 )
@@ -58,6 +59,13 @@ type ServerConf struct {
     // Encoder optionally processes and encodes messages received by this
     // server's channels.
     Encoder MessageEncoder
+
+    // Logger used by the chat server to report events. If this is nil, no
+    // message shall be logged!
+    Logger *log.Logger
+
+    // Whether debug messages should be logged.
+    DebugLog bool
 }
 
 // GetDefaultServerConf retrieve a fully initialized `ServerConf`, with all
@@ -172,6 +180,10 @@ func (s *server) RequestToken(username, channel string) (string, error) {
 
     _, err := crand.Read(randToken[:])
     if err != nil {
+        if s.conf.Logger != nil {
+            s.conf.Logger.Printf("[ERROR] go_chat_i_guess/server: Failed to generate a connection token.\n\tchannel: \"%s\"\n\tusername: \"%s\"\n\terror: %+v",
+                    channel, username, err)
+        }
         return "", err
     }
 
@@ -185,6 +197,11 @@ func (s *server) RequestToken(username, channel string) (string, error) {
     s.tokenMutex.Lock()
     s.tokens[token] = value
     s.tokenMutex.Unlock()
+
+    if s.conf.DebugLog && s.conf.Logger != nil {
+        s.conf.Logger.Printf("[DEBUG] go_chat_i_guess/server: Connection token generated successfully.\n\tchannel: \"%s\"\n\tusername: \"%s\"\n\ttoken: \"%s\"",
+                channel, username, token)
+    }
 
     return token, nil
 }
@@ -200,6 +217,10 @@ func (s *server) CreateChannel(name string) error {
     defer s.chanMutex.Unlock()
 
     if _, ok := s.channels[name]; ok {
+        if s.conf.Logger != nil {
+            s.conf.Logger.Printf("[ERROR] go_chat_i_guess/server: Tried to create a channel with a duplicated name.\n\tchannel: \"%s\"",
+                    name)
+        }
         return DuplicatedChannel
     }
 
@@ -215,6 +236,10 @@ func (s *server) GetChannel(name string) (ChatChannel, error) {
     if c, ok := s.channels[name]; ok {
         return c, nil
     } else {
+        if s.conf.Logger != nil {
+            s.conf.Logger.Printf("[ERROR] go_chat_i_guess/server: Tried to retrieve a nonexistent channel.\n\tchannel: \"%s\"",
+                    name)
+        }
         return nil, InvalidChannel
     }
 }
@@ -230,8 +255,16 @@ func (s *server) getToken(token string) (string, string, error) {
     s.tokenMutex.Unlock()
 
     if ok {
+        if s.conf.DebugLog && s.conf.Logger != nil {
+            s.conf.Logger.Printf("[DEBUG] go_chat_i_guess/server: Token consumed successfully.\n\tchannel: \"%s\"\n\tusername: \"%s\"\n\ttoken: \"%s\"",
+                    val.channel, val.username, token)
+        }
         return val.username, val.channel, nil
     } else {
+        if s.conf.Logger != nil {
+            s.conf.Logger.Printf("[ERROR] go_chat_i_guess/server: Token not found.\n\ttoken: \"%s\"",
+                    token)
+        }
         return "", "", InvalidToken
     }
 }
@@ -241,6 +274,11 @@ func (s *server) getToken(token string) (string, string, error) {
 //
 // On error, the token must be re-generated.
 func (s *server) Connect(token string, conn Conn) error {
+    if s.conf.DebugLog && s.conf.Logger != nil {
+        s.conf.Logger.Printf("[DEBUG] go_chat_i_guess/server: Trying to connect with token.\n\ttoken: \"%s\"",
+                token)
+    }
+
     username, channelName, err := s.getToken(token)
     if err != nil {
         return err
@@ -263,6 +301,10 @@ func (s *server) Connect(token string, conn Conn) error {
 //
 // On error, the token must be re-generated.
 func (s *server) ConnectAndWait(token string, conn Conn) error {
+    if s.conf.DebugLog && s.conf.Logger != nil {
+        s.conf.Logger.Printf("[DEBUG] go_chat_i_guess/server: Trying to connect with token and blocking...\n\ttoken: \"%s\"",
+                token)
+    }
     username, channelName, err := s.getToken(token)
     if err != nil {
         return err
@@ -285,6 +327,10 @@ func (s *server) cleanup() {
         select {
         case <-token.C:
             // Clean up connection tokens
+            if s.conf.DebugLog && s.conf.Logger != nil {
+                s.conf.Logger.Printf("[DEBUG] go_chat_i_guess/server: Removing expired tokens...")
+            }
+
             s.tokenMutex.Lock()
             now := time.Now()
             for key, val := range s.tokens {
@@ -295,6 +341,10 @@ func (s *server) cleanup() {
             s.tokenMutex.Unlock()
         case <-channel.C:
             // Clean up channels
+            if s.conf.DebugLog && s.conf.Logger != nil {
+                s.conf.Logger.Printf("[DEBUG] go_chat_i_guess/server: Removing closed channels...")
+            }
+
             s.chanMutex.Lock()
             for key, val := range s.channels {
                 if val.IsClosed() {
@@ -304,6 +354,9 @@ func (s *server) cleanup() {
             s.chanMutex.Unlock()
         case <-s.stop:
             // Do nothing and let cleanup exit
+            if s.conf.DebugLog && s.conf.Logger != nil {
+                s.conf.Logger.Printf("[DEBUG] go_chat_i_guess/server: Stopping the cleanup goroutine...")
+            }
         }
     }
 
@@ -323,6 +376,10 @@ func NewServerConf(conf ServerConf) ChatServer {
         tokens: make(map[string]*accessToken),
         running: true,
         stop: make(chan struct{}),
+    }
+    if s.conf.DebugLog && s.conf.Logger != nil {
+        s.conf.Logger.Printf("[DEBUG] go_chat_i_guess/server: Starting a new Chat Server...\n\tconf: %+v",
+                conf)
     }
 
     // Start the clean up goroutine for expired objects

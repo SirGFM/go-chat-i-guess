@@ -7,6 +7,7 @@ import (
     "log"
     "net/http"
     "net/url"
+    "os"
     "path"
     "strings"
     "time"
@@ -167,6 +168,8 @@ func runWeb(args Args) io.Closer {
     }
     conf := gochat.GetDefaultServerConf()
     conf.Encoder = &srv
+    conf.Logger = log.New(os.Stdout, "chat-server: ", log.Lshortfile | log.Ldate | log.Ltime | log.Lmicroseconds | log.Lmsgprefix)
+    conf.DebugLog = args.Debug
     srv.chat = gochat.NewServerConf(conf)
     setUpgrader(args)
 

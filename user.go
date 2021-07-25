@@ -2,6 +2,7 @@ package go_chat_i_guess
 
 import (
     "io"
+    "log"
     "time"
     "sync/atomic"
 )
@@ -36,6 +37,13 @@ type user struct {
 
     // Whether the user is currently running.
     running uint32
+
+    // logger used by the user to report events. If this is nil, no message
+    // shall be logged!
+    logger *log.Logger
+
+    // Whether debug messages should be logged.
+    debugLog bool
 }
 
 // isRunning check if the user is still running.
@@ -48,6 +56,11 @@ func (u *user) run() {
     for u.isRunning() {
         msg, err := u.conn.Recv()
         if err != nil {
+            if u.logger != nil {
+                u.logger.Printf("[ERROR] go_chat_i_guess/user: Failed to receive the message.\n\tuser: \"%s\"\n\terror: %+v",
+                        u.name, err)
+            }
+
             u.Close()
             return
         }
@@ -73,6 +86,11 @@ func (u *user) SendStr(msg string) error {
 // as it will only run on the first call.
 func (u *user) Close() error {
     if atomic.CompareAndSwapUint32(&u.running, 1, 0) {
+        if u.debugLog && u.logger != nil {
+            u.logger.Printf("[DEBUG] go_chat_i_guess/user: Closing connection...\n\tuser: \"%s\"",
+                    u.name)
+        }
+
         u.conn.Close()
     }
 
@@ -100,8 +118,10 @@ func (u *user) RunAndWait() {
 // `newUser()` executes a new goroutine to handle messages received by the
 // user, forwarding those message to the channel. To stop this goroutine
 // and clean up its resources, call `c.Close()`.
-func newUserBg(name string, channel ChatChannel, conn Conn) *user {
-    u := newUser(name, channel, conn)
+func newUserBg(name string, channel ChatChannel, conn Conn,
+        logger *log.Logger, debugLog bool) *user {
+
+    u := newUser(name, channel, conn, logger, debugLog)
 
     go u.run()
 
@@ -112,12 +132,16 @@ func newUserBg(name string, channel ChatChannel, conn Conn) *user {
 // receiving and sending messages to `conn`.
 //
 //
-func newUser(name string, channel ChatChannel, conn Conn) *user {
+func newUser(name string, channel ChatChannel, conn Conn,
+        logger *log.Logger, debugLog bool) *user {
+
     return &user {
         name: name,
         last: time.Now(),
         channel: channel,
         conn: conn,
         running: 1,
+        logger: logger,
+        debugLog: debugLog,
     }
 }
