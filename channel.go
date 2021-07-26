@@ -184,6 +184,32 @@ func (c *channel) IsClosed() bool {
     return atomic.LoadUint32(&c.running) == 0
 }
 
+// Remove the user `username` from this channel.
+func (c *channel) RemoveUser(username string) error {
+    var err error = InvalidUser
+
+    c.lockUsers.Lock()
+    for k := range c.users {
+        if k == username {
+            c.users[k].Close()
+            delete(c.users, k)
+            err = nil
+            break
+        }
+    }
+    c.lockUsers.Unlock()
+
+    if err == nil && c.debugLog && c.logger != nil {
+        c.logger.Printf("[DEBUG] go_chat_i_guess/channel: Removing user...\n\tchannel: \"%s\"\n\tuser: \"%s\"",
+                c.name, username)
+    } else if err != nil && c.logger != nil {
+        c.logger.Printf("[ERROR] go_chat_i_guess/channel: Couldn't remove the user.\n\tchannel: \"%s\"\n\tuser: \"%s\"",
+                c.name, username)
+    }
+
+    return err
+}
+
 // messageUser send `msgStr` to the specified user `u`.
 //
 // If the channel fails to send the message to the user, the user gets
@@ -442,6 +468,9 @@ type ChatChannel interface {
 
     // IsClosed check if the channel is closed.
     IsClosed() bool
+
+    // Remove the user `username` from this channel.
+    RemoveUser(username string) error
 
     // ConnectClient add a new client to the channel.
     //

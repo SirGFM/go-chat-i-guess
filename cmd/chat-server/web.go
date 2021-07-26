@@ -147,6 +147,13 @@ func (s *server) Encode(channel gochat.ChatChannel, date time.Time, msg,
         channel.NewSystemWhisper(msg, from)
         // Don't broadcast this message.
         return ""
+    case "/quit":
+        // Try to quit from the channel, and filter the original message.
+        err := channel.RemoveUser(from)
+        if err != nil {
+            channel.NewSystemWhisper("Couldn't quit from the channel", from)
+        }
+        return ""
     }
 
     // Otherwise, use the default encoding.

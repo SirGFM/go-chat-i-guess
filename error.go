@@ -22,6 +22,8 @@ const (
     ConnEOF
     // A test connection timed out
     TestTimeout
+    // Invalid user.
+    InvalidUser
 )
 
 func (c ChatError) Error() string {
@@ -42,6 +44,8 @@ func (c ChatError) Error() string {
         return "The connection was closed"
     case TestTimeout:
         return "A test connection timed out"
+    case InvalidUser:
+        return "Invalid user"
     default:
         return "Unknown error"
     }
