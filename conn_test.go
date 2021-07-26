@@ -13,11 +13,11 @@ import (
 // interactions.
 //
 // To simulate a message arriving from the client's remote endpoint, push a
-// message into `fromClient`:
+// message into `fromUser`:
 //
 //     c := mockConn()
 //     /* Setup the channel and the user. */
-//     c.fromClient <- "the message"
+//     c.fromUser <- "the message"
 //
 // On the other hand, to simulate a client receiving a message, pop a
 // message from `fromServer`. Be sure to check that the channel isn't
@@ -32,10 +32,10 @@ import (
 //         t.Error("Server did not respond.")
 //     }
 type mockConn struct {
-    // fromClient simulates incoming messages (from the server's
+    // fromUser simulates incoming messages (from the server's
     // perspectives) from the client's remote endpoint. Therefore, tests
     // must push directly to this channel.
-    fromClient chan string
+    fromUser chan string
 
     // fromServer simulates outgoing messages (from the server's
     // perspectives) to the client's remote endpoint. Therefore, tests must
@@ -69,7 +69,7 @@ func (mc *mockConn) Recv() (string, error) {
     var msg string
 
     select {
-    case msg = <-mc.fromClient:
+    case msg = <-mc.fromUser:
         return msg, nil
     case <-mc.stop:
         return msg, ConnEOF
@@ -93,7 +93,7 @@ func (mc *mockConn) TestSend(msg string) error {
         return ConnEOF
     }
 
-    mc.fromClient <- msg
+    mc.fromUser <- msg
     return nil
 }
 
@@ -112,7 +112,7 @@ func (mc *mockConn) TestRecv(timeout time.Duration) (string, error) {
 // NewMockConn() create a dummy, mock connection that may be used in tests.
 func NewMockConn() Conn {
     return &mockConn {
-        fromClient: make(chan string),
+        fromUser: make(chan string),
         fromServer: make(chan string, 100),
         stop: make(chan struct{}),
         running: 1,

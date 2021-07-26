@@ -299,7 +299,7 @@ func (s *server) Connect(token string, conn Conn) error {
         return err
     }
 
-    return c.ConnectClient(username, conn)
+    return c.ConnectUser(username, conn)
 }
 
 // ConnectAndWait connect a user to a channel, previously associated to
@@ -331,7 +331,7 @@ func (s *server) ConnectAndWait(token string, conn Conn) error {
         return err
     }
 
-    return c.ConnectClientAndWait(username, conn)
+    return c.ConnectUserAndWait(username, conn)
 }
 
 // cleanup verify, periodically, whether any object should be removed.

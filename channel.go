@@ -239,7 +239,7 @@ func (c *channel) messageUserUsafe(u *user, msgStr string) {
 //
 // When `newChannel()` is called, `c.run()` is executed in a new goroutine.
 // `c.Close()` should be called to stop the goroutine and clean up its
-// resources. Regardless, if every client disconnects and the channel is
+// resources. Regardless, if every user disconnects and the channel is
 // left idle for long enough (more specifically, for `defIdleTimeout`),
 // this goroutine will automatically stop.
 func (c *channel) run() {
@@ -299,7 +299,7 @@ func (c *channel) handleMessage(msg *message) {
         }
     }
 
-    // Broadcast the message to every client. Alternatively, if the
+    // Broadcast the message to every user. Alternatively, if the
     // message was directed to a specific user, send them the message
     // and skip everything else.
     c.lockUsers.Lock()
@@ -343,19 +343,19 @@ func (c *channel) checkConnections() {
     c.lockUsers.Unlock()
 }
 
-// ConnectClient add a new client to the channel.
+// ConnectUser add a new user to the channel.
 //
 // It's entirely up to the caller to initialize the connection used by
-// this client, for example upgrading a HTTP request to a WebSocket
+// this user, for example upgrading a HTTP request to a WebSocket
 // connection.
 //
 // The `channel` do properly synchronize this function, so it may be
 // called by different goroutines concurrently.
 //
 // If `conn` is nil, then this function will panic!
-func (c *channel) ConnectClient(username string, conn Conn) error {
+func (c *channel) ConnectUser(username string, conn Conn) error {
     if conn == nil {
-        panic("go_chat_i_guess/channel ConnectClient: nil conn")
+        panic("go_chat_i_guess/channel ConnectUser: nil conn")
     }
 
     u := newUserBg(username, c, conn, c.logger, c.debugLog)
@@ -376,23 +376,23 @@ func (c *channel) ConnectClient(username string, conn Conn) error {
     return nil
 }
 
-// ConnectClient add a new client to the channel and blocks until the
-// client closes the connection to the server.
+// ConnectUser add a new user to the channel and blocks until the
+// user closes the connection to the server.
 //
 // The `channel` does properly synchronize this function, so it may be
 // called by different goroutines concurrently.
 //
 // On error, `conn` is left unchanged and must be closed by the caller.
 //
-// Differently from `ConnectClient`, this function handles messages
+// Differently from `ConnectUser`, this function handles messages
 // from the remote client in the calling goroutine. This may be
 // advantageous if the external server already spawns a new goroutine
 // to handle each new connection.
 //
 // If `conn` is nil, then this function will panic!
-func (c *channel) ConnectClientAndWait(username string, conn Conn) error {
+func (c *channel) ConnectUserAndWait(username string, conn Conn) error {
     if conn == nil {
-        panic("go_chat_i_guess/channel ConnectClientAndWait: nil conn")
+        panic("go_chat_i_guess/channel ConnectUserAndWait: nil conn")
     }
 
     u := newUser(username, c, conn, c.logger, c.debugLog)
@@ -416,7 +416,7 @@ func (c *channel) ConnectClientAndWait(username string, conn Conn) error {
     return nil
 }
 
-// Close the channel, remove every client and stop the goroutine.
+// Close the channel, remove every user and stop the goroutine.
 func (c *channel) Close() error {
     // Atomically check if `c.running` is 1 and set it to 0. If this
     // returns true, the swap happened and thus this is the first time
@@ -472,10 +472,10 @@ type ChatChannel interface {
     // Remove the user `username` from this channel.
     RemoveUser(username string) error
 
-    // ConnectClient add a new client to the channel.
+    // ConnectUser add a new user to the channel.
     //
     // It's entirely up to the caller to initialize the connection used by
-    // this client, for example upgrading a HTTP request to a WebSocket
+    // this user, for example upgrading a HTTP request to a WebSocket
     // connection.
     //
     // The `channel` does properly synchronize this function, so it may be
@@ -484,23 +484,23 @@ type ChatChannel interface {
     // On error, `conn` is left unchanged and must be closed by the caller.
     //
     // If `conn` is nil, then this function will panic!
-    ConnectClient(username string, conn Conn) error
+    ConnectUser(username string, conn Conn) error
 
-    // ConnectClient add a new client to the channel and blocks until the
-    // client closes the connection to the server.
+    // ConnectUser add a new user to the channel and blocks until the
+    // user closes the connection to the server.
     //
     // The `channel` does properly synchronize this function, so it may be
     // called by different goroutines concurrently.
     //
     // On error, `conn` is left unchanged and must be closed by the caller.
     //
-    // Differently from `ConnectClient`, this function handles messages
+    // Differently from `ConnectUser`, this function handles messages
     // from the remote client in the calling goroutine. This may be
     // advantageous if the external server already spawns a new goroutine
     // to handle each new connection.
     //
     // If `conn` is nil, then this function will panic!
-    ConnectClientAndWait(username string, conn Conn) error
+    ConnectUserAndWait(username string, conn Conn) error
 }
 
 // newChannel create a new ChatChannel named `name`.
@@ -512,7 +512,7 @@ type ChatChannel interface {
 // the channel. To stop this goroutine and clean up its resources, call
 // `c.Close()`.
 //
-// Regardless, if every client disconnects and the channel is left idle for
+// Regardless, if every user disconnects and the channel is left idle for
 // long enough (more specifically, for `defIdleTimeout`), this goroutine
 // will automatically stop.
 func newChannel(name string, conf ServerConf) ChatChannel {
