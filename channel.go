@@ -325,7 +325,13 @@ func (c *channel) checkConnections() {
 //
 // The `channel` do properly synchronize this function, so it may be
 // called by different goroutines concurrently.
+//
+// If `conn` is nil, then this function will panic!
 func (c *channel) ConnectClient(username string, conn Conn) error {
+    if conn == nil {
+        panic("go_chat_i_guess/channel ConnectClient: nil conn")
+    }
+
     u := newUserBg(username, c, conn, c.logger, c.debugLog)
 
     c.lockUsers.Lock()
@@ -356,7 +362,13 @@ func (c *channel) ConnectClient(username string, conn Conn) error {
 // from the remote client in the calling goroutine. This may be
 // advantageous if the external server already spawns a new goroutine
 // to handle each new connection.
+//
+// If `conn` is nil, then this function will panic!
 func (c *channel) ConnectClientAndWait(username string, conn Conn) error {
+    if conn == nil {
+        panic("go_chat_i_guess/channel ConnectClientAndWait: nil conn")
+    }
+
     u := newUser(username, c, conn, c.logger, c.debugLog)
 
     c.lockUsers.Lock()
@@ -441,6 +453,8 @@ type ChatChannel interface {
     // called by different goroutines concurrently.
     //
     // On error, `conn` is left unchanged and must be closed by the caller.
+    //
+    // If `conn` is nil, then this function will panic!
     ConnectClient(username string, conn Conn) error
 
     // ConnectClient add a new client to the channel and blocks until the
@@ -455,6 +469,8 @@ type ChatChannel interface {
     // from the remote client in the calling goroutine. This may be
     // advantageous if the external server already spawns a new goroutine
     // to handle each new connection.
+    //
+    // If `conn` is nil, then this function will panic!
     ConnectClientAndWait(username string, conn Conn) error
 }
 

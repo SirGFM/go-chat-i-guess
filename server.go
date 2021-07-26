@@ -138,6 +138,8 @@ type ChatServer interface {
     // `conn` to communicate with this user.
     //
     // On error, the token must be re-generated.
+    //
+    // If `conn` is nil, then this function will panic!
     Connect(token string, conn Conn) error
 
     // ConnectAndWait connect a user to a channel, previously associated to
@@ -148,6 +150,8 @@ type ChatServer interface {
     // handle each new incoming connection.
     //
     // On error, the token must be re-generated.
+    //
+    // If `conn` is nil, then this function will panic!
     ConnectAndWait(token string, conn Conn) error
 }
 
@@ -273,7 +277,13 @@ func (s *server) getToken(token string) (string, string, error) {
 // `conn` to communicate with this user.
 //
 // On error, the token must be re-generated.
+//
+// If `conn` is nil, then this function will panic!
 func (s *server) Connect(token string, conn Conn) error {
+    if conn == nil {
+        panic("go_chat_i_guess/server Connect: nil conn")
+    }
+
     if s.conf.DebugLog && s.conf.Logger != nil {
         s.conf.Logger.Printf("[DEBUG] go_chat_i_guess/server: Trying to connect with token.\n\ttoken: \"%s\"",
                 token)
@@ -300,7 +310,13 @@ func (s *server) Connect(token string, conn Conn) error {
 // handle each new incoming connection.
 //
 // On error, the token must be re-generated.
+//
+// If `conn` is nil, then this function will panic!
 func (s *server) ConnectAndWait(token string, conn Conn) error {
+    if conn == nil {
+        panic("go_chat_i_guess/server ConnectAndWait: nil conn")
+    }
+
     if s.conf.DebugLog && s.conf.Logger != nil {
         s.conf.Logger.Printf("[DEBUG] go_chat_i_guess/server: Trying to connect with token and blocking...\n\ttoken: \"%s\"",
                 token)

@@ -194,8 +194,19 @@ func (c *gwsConn) pong(appData string) error {
 // Gorilla/ws's documentation specifies that if `SetReadDeadline` is set
 // and a read times out, the websocket becomes corrupt. To work around
 // that, `NewConn` spawns a goroutine to manually detect timeouts.
+//
+// All parameters must be non-nil, and timeout cannot be 0. `NewConn`
+// panics if any of the parameters is invalid.
 func NewConn(upgrader gows.Upgrader, timeout time.Duration,
         w http.ResponseWriter, req *http.Request) (gochat.Conn, error) {
+
+    if w == nil {
+        panic("go_chat_i_guess/gorilla-ws-conn/conn NewConn: nil ResponseWritter")
+    } else if req == nil {
+        panic("go_chat_i_guess/gorilla-ws-conn/conn NewConn: nil HTTP Request")
+    } else if timeout == 0 {
+        panic("go_chat_i_guess/gorilla-ws-conn/conn NewConn: timeout cannot be 0")
+    }
 
     conn, err := upgrader.Upgrade(w, req, nil)
     if err != nil {

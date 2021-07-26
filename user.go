@@ -118,8 +118,16 @@ func (u *user) RunAndWait() {
 // `newUser()` executes a new goroutine to handle messages received by the
 // user, forwarding those message to the channel. To stop this goroutine
 // and clean up its resources, call `c.Close()`.
+//
+// If `channel` or `conn` is nil, then this function will panic!
 func newUserBg(name string, channel ChatChannel, conn Conn,
         logger *log.Logger, debugLog bool) *user {
+
+    if channel == nil {
+        panic("go_chat_i_guess/user newUserBg: nil channel")
+    } else if conn == nil {
+        panic("go_chat_i_guess/user newUserBg: nil conn")
+    }
 
     u := newUser(name, channel, conn, logger, debugLog)
 
@@ -131,7 +139,7 @@ func newUserBg(name string, channel ChatChannel, conn Conn,
 // newUser create a new user named `name`, connected to `channel` and
 // receiving and sending messages to `conn`.
 //
-//
+// If `channel` or `conn` is nil, then this function will panic!
 func newUser(name string, channel ChatChannel, conn Conn,
         logger *log.Logger, debugLog bool) *user {
 
