@@ -184,6 +184,15 @@ func (c *channel) IsClosed() bool {
     return atomic.LoadUint32(&c.running) == 0
 }
 
+// RemoveUserUnsafe remove the user `username` from this channel, assuming
+// that access to the map is properly synchronized.
+func (c *channel) RemoveUserUnsafe(username string) {
+    c.users[username].Close()
+    delete(c.users, username)
+
+    c.NewSystemBroadcast(username + " exited " + c.name + "...")
+}
+
 // Remove the user `username` from this channel.
 func (c *channel) RemoveUser(username string) error {
     var err error = InvalidUser
@@ -191,8 +200,7 @@ func (c *channel) RemoveUser(username string) error {
     c.lockUsers.Lock()
     for k := range c.users {
         if k == username {
-            c.users[k].Close()
-            delete(c.users, k)
+            c.RemoveUserUnsafe(k)
             err = nil
             break
         }
@@ -224,14 +232,14 @@ func (c *channel) messageUserUsafe(u *user, msgStr string) {
                 c.logger.Printf("[DEBUG] go_chat_i_guess/channel: Connection to user was closed.\n\tchannel: \"%s\"\n\tusername: \"%s\"",
                         c.name, username)
             }
-            c.NewSystemBroadcast(username + " exited.")
         } else if err != nil {
             if c.logger != nil {
                 c.logger.Printf("[ERROR] go_chat_i_guess/channel: Couldn't send a message to the user.\n\tchannel: \"%s\"\n\tusername: \"%s\"\n\terror: %+v",
                         c.name, username, err)
             }
         }
-        delete(c.users, username)
+
+        c.RemoveUserUnsafe(username)
     }
 }
 
@@ -430,8 +438,7 @@ func (c *channel) Close() error {
 
         c.lockUsers.Lock()
         for k := range c.users {
-            c.users[k].Close()
-            delete(c.users, k)
+            c.RemoveUserUnsafe(k)
         }
         c.lockUsers.Unlock()
     }
