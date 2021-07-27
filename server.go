@@ -56,9 +56,11 @@ type ServerConf struct {
     // Delay between executions of the channel cleanup routine.
     ChannelCleanupDelay time.Duration
 
-    // Encoder optionally processes and encodes messages received by this
-    // server's channels.
-    Encoder MessageEncoder
+    // Controller optionally processes and encodes messages received by
+    // this server's channels.
+    //
+    // This may optionally implement `ChannelController` as well!
+    Controller MessageEncoder
 
     // Logger used by the chat server to report events. If this is nil, no
     // message shall be logged!

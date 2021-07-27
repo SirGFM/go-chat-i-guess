@@ -130,6 +130,17 @@ func (s *server) Close() error {
     return nil
 }
 
+// OnConnect is called whenever a user connects.
+func (s *server) OnConnect(channel gochat.ChatChannel, username string) {
+    channel.NewSystemBroadcast(username + " has just entered " + channel.Name() + "! Say hi!")
+}
+
+// OnDisconnect is called whenever a user disconnects.
+func (s *server) OnDisconnect(channel gochat.RestrictedChatChannel,
+        username string) {
+    channel.NewSystemBroadcast(username + "has exited " + channel.Name())
+}
+
 // Encode the received message.
 func (s *server) Encode(channel gochat.ChatChannel, date time.Time, msg,
         from, to string) string {
@@ -174,7 +185,7 @@ func runWeb(args Args) io.Closer {
         Handler: &srv,
     }
     conf := gochat.GetDefaultServerConf()
-    conf.Encoder = &srv
+    conf.Controller = &srv
     conf.Logger = log.New(os.Stdout, "chat-server: ", log.Lshortfile | log.Ldate | log.Ltime | log.Lmicroseconds | log.Lmsgprefix)
     conf.DebugLog = args.Debug
     srv.chat = gochat.NewServerConf(conf)

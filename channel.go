@@ -76,6 +76,34 @@ type MessageEncoder interface {
     Encode(channel ChatChannel, date time.Time, msg, from, to string) string
 }
 
+// ChannelController processes events received by the channel.
+type ChannelController interface {
+    MessageEncoder
+
+    // OnConnect is called whenever a channel detects that a user has just
+    // joined it.
+    //
+    // If the channel doesn't have a `ChannelController`, it broadcasts the
+    // message:
+    //
+    //     channel.NewSystemBroadcast(username + " entered " + channel.Name() + "...")
+    OnConnect(channel ChatChannel, username string)
+
+    // OnDisconnect is called whenever a channel detects that a user has
+    // disconnected.
+    //
+    // Since this may be called with some internal objects locked, only a
+    // few channel methods may be called from this function. For this
+    // reason, the `RestrictedChatChannel` SHALL NOT be cast and used as a
+    // `ChatChannel`!
+    //
+    // If the channel doesn't have a `ChannelController`, it broadcasts the
+    // message:
+    //
+    //     channel.NewSystemBroadcast(username + " exited " + channel.Name() + "...")
+    OnDisconnect(channel RestrictedChatChannel, username string)
+}
+
 // A chat channel, to which users may connect to.
 type channel struct {
     // name of this channel.
@@ -84,6 +112,10 @@ type channel struct {
     // encoder optionally encodes/process messages. If not defined,
     // `message.Encode()` is used instead.
     encoder MessageEncoder
+
+    // controller optionally processes events. See `ChannelController` for
+    // the default behaviour, if not supplied.
+    controller ChannelController
 
     // recv messages sent from a remote client.
     recv chan *message
@@ -190,7 +222,11 @@ func (c *channel) RemoveUserUnsafe(username string) {
     c.users[username].Close()
     delete(c.users, username)
 
-    c.NewSystemBroadcast(username + " exited " + c.name + "...")
+    if c.controller != nil {
+        c.controller.OnDisconnect(c, username)
+    } else {
+        c.NewSystemBroadcast(username + " exited " + c.name + "...")
+    }
 }
 
 // Remove the user `username` from this channel.
@@ -362,6 +398,8 @@ func (c *channel) checkConnections() {
 //
 // If `conn` is nil, then this function will panic!
 func (c *channel) ConnectUser(username string, conn Conn) error {
+    var err error
+
     if conn == nil {
         panic("go_chat_i_guess/channel ConnectUser: nil conn")
     }
@@ -369,19 +407,26 @@ func (c *channel) ConnectUser(username string, conn Conn) error {
     u := newUserBg(username, c, conn, c.logger, c.debugLog)
 
     c.lockUsers.Lock()
-    defer c.lockUsers.Unlock()
     if _, ok := c.users[username]; ok {
         if c.logger != nil {
             c.logger.Printf("[ERROR] go_chat_i_guess/channel: User tried to connect more than once to a channel.\n\tchannel: \"%s\"\n\tuser: \"%s\"",
                     c.name, username)
         }
-        return UserAlreadyConnected
+        err = UserAlreadyConnected
+    } else {
+        c.users[username] = u
+    }
+    c.lockUsers.Unlock()
+
+    if err == nil {
+        if c.controller != nil {
+            c.controller.OnConnect(c, username)
+        } else {
+            c.NewSystemBroadcast(username + " entered " + c.name +"!")
+        }
     }
 
-    c.users[username] = u
-    c.NewSystemBroadcast(username + " entered " + c.name +"!")
-
-    return nil
+    return err
 }
 
 // ConnectUser add a new user to the channel and blocks until the
@@ -418,7 +463,11 @@ func (c *channel) ConnectUserAndWait(username string, conn Conn) error {
     c.users[username] = u
     c.lockUsers.Unlock()
 
-    c.NewSystemBroadcast(username + " entered " + c.name +"!")
+    if c.controller != nil {
+        c.controller.OnConnect(c, username)
+    } else {
+        c.NewSystemBroadcast(username + " entered " + c.name +"!")
+    }
     u.RunAndWait()
 
     return nil
@@ -446,17 +495,11 @@ func (c *channel) Close() error {
     return nil
 }
 
-// The public interface for a chat channel.
-type ChatChannel interface {
-    io.Closer
-
+// Restricted public interface for a chat channel, usable while handling
+// channel events.
+type RestrictedChatChannel interface {
     // Name retrieve the channel's name.
     Name() string
-
-    // GetUsers retrieve the list of connected users in this channel. If
-    // `list` is supplied, the users are appended to the that list, so be
-    // sure to empty it before calling this function.
-    GetUsers(list []string) []string
 
     // NewBroadcast queue a new broadcast message from a specific sender,
     // setting its `Date` to the current time and setting the message's
@@ -475,6 +518,18 @@ type ChatChannel interface {
 
     // IsClosed check if the channel is closed.
     IsClosed() bool
+}
+
+// The public interface for a chat channel.
+type ChatChannel interface {
+    io.Closer
+
+    RestrictedChatChannel
+
+    // GetUsers retrieve the list of connected users in this channel. If
+    // `list` is supplied, the users are appended to the that list, so be
+    // sure to empty it before calling this function.
+    GetUsers(list []string) []string
 
     // Remove the user `username` from this channel.
     RemoveUser(username string) error
@@ -512,8 +567,10 @@ type ChatChannel interface {
 
 // newChannel create a new ChatChannel named `name`.
 //
-// An `Encoder` may optionally be supplied on `conf` to process and encode
-// messages received by the channel.
+// A `Controller` may optionally be supplied on `conf` to process and
+// encode messages received by the channel. Additionally, if this
+// `Controller` implements `ChannelController` as well, then it will also
+// be used to process channel events.
 //
 // `newChannel()` executes a new goroutine to handle messages received by
 // the channel. To stop this goroutine and clean up its resources, call
@@ -525,7 +582,7 @@ type ChatChannel interface {
 func newChannel(name string, conf ServerConf) ChatChannel {
     c := &channel {
         name: name,
-        encoder: conf.Encoder,
+        encoder: conf.Controller,
         recv: make(chan *message, 8),
         idleTimeout: conf.ChannelIdleTimeout,
         users: make(map[string]*user),
@@ -534,6 +591,19 @@ func newChannel(name string, conf ServerConf) ChatChannel {
         stop: make(chan struct{}),
         logger: conf.Logger,
         debugLog: conf.DebugLog,
+    }
+
+    // Optionally, check if Controller also implements `ChannelController`
+    // and store that as well.
+    if conf.Controller != nil {
+        if ctrl, ok := conf.Controller.(ChannelController); ok {
+            if conf.DebugLog && conf.Logger != nil {
+                conf.Logger.Printf("[DEBUG] go_chat_i_guess/channel: Using a message controller...\n\tchannel: \"%s\"",
+                        c.name)
+            }
+
+            c.controller = ctrl
+        }
     }
 
     go c.run()
