@@ -138,7 +138,7 @@ func (s *server) OnConnect(channel gochat.ChatChannel, username string) {
 // OnDisconnect is called whenever a user disconnects.
 func (s *server) OnDisconnect(channel gochat.RestrictedChatChannel,
         username string) {
-    channel.NewSystemBroadcast(username + "has exited " + channel.Name())
+    channel.NewSystemBroadcast(username + " has exited " + channel.Name())
 }
 
 // Encode the received message.
