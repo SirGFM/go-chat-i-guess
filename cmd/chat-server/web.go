@@ -1,6 +1,7 @@
 package main
 
 import (
+    "encoding/base64"
     "fmt"
     gochat "github.com/SirGFM/go-chat-i-guess"
     "io"
@@ -20,6 +21,14 @@ type server struct {
     chat gochat.ChatServer
 }
 
+// decodeB64 decode the string `s` using the URL encoding scheme of base64.
+func decodeB64(s string) (string, error) {
+    res, err := base64.URLEncoding.DecodeString(s)
+    if err == nil {
+        return string(res), nil
+    }
+    return "", err
+}
 
 // ServeHTTP is called by Go's http package whenever a new HTTP request arrives
 func (s *server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -31,7 +40,11 @@ func (s *server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
     } else {
         parts := strings.Split(uri, "/")
         if len(parts) == 2 && parts[0] == "new_channel" {
-            err := s.chat.CreateChannel(parts[1])
+            channel, err := decodeB64(parts[1])
+            if err == nil {
+                err = s.chat.CreateChannel(channel)
+            }
+
             if err == nil {
                 w.Header().Set("Content-Type", "text/plain")
                 w.WriteHeader(http.StatusNoContent)
@@ -41,8 +54,16 @@ func (s *server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
                 log.Printf("%s - %s - %s [500]", req.RemoteAddr, req.Method, uri)
             }
         } else if len(parts) == 3 && parts[0] == "new_token" {
-            channel := parts[1]
-            username := parts[2]
+            channel, err := decodeB64(parts[1])
+            if err != nil {
+                httpTextReply(http.StatusInternalServerError, fmt.Sprintf("Couldn't get the new token's channel: %+v", err), w)
+                log.Printf("%s - %s - %s [500]", req.RemoteAddr, req.Method, uri)
+            }
+            username, err := decodeB64(parts[2])
+            if err != nil {
+                httpTextReply(http.StatusInternalServerError, fmt.Sprintf("Couldn't get the new token's username: %+v", err), w)
+                log.Printf("%s - %s - %s [500]", req.RemoteAddr, req.Method, uri)
+            }
 
             tk, err := s.chat.RequestToken(username, channel)
             if err == nil {

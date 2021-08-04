@@ -62,6 +62,7 @@ const chat_page = `<html>
             let ws = null;
             let channel = '';
             let username = '';
+            let printable_username = '';
 
             let appendMsg = function(msg) {
                 let chat = document.getElementById('chat');
@@ -84,12 +85,25 @@ const chat_page = `<html>
                 ws = null;
             }
 
+            let uni2b64 = function (str) {
+                /* https://developer.mozilla.org/en-US/docs/Glossary/Base64 */
+                let uri = encodeURIComponent(str);
+                let val = uri.replace(/%([0-9A-F]{2})/g, function(_, p1) {
+                    return String.fromCharCode('0x' + p1);
+                });
+                /* The conversion from '+' -> '-' and '/' -> '_' is to make
+                 * this safe for use as URLs. */
+                return btoa(val).replaceAll('+', '-').replaceAll('/', '_');
+            }
+
             let connect = function() {
                 let cfield = document.getElementById('channel');
                 let ufield = document.getElementById('username');
+                let printable_channel = cfield.value;
 
-                channel = cfield.value;
-                username = ufield.value;
+                channel = uni2b64(printable_channel);
+                printable_username = ufield.value;
+                username = uni2b64(printable_username);
 
                 if (ws != null) {
                     ws.close()
@@ -114,7 +128,7 @@ const chat_page = `<html>
                         ws.addEventListener('message', wsRecv);
                         ws.addEventListener('close', wsClose);
 
-                        appendMsg('<p> Now talking on ' + channel + '! </p>');
+                        appendMsg('<p> Now talking on ' + printable_channel + '! </p>');
                     }
                     else {
                         appendMsg('<p> Error: ' + e.target.response + '! </p>');
@@ -139,7 +153,7 @@ const chat_page = `<html>
                 }
 
                 ws.send(msg);
-                appendMsg('<p> <small> just sent: ' + username + ' - ' + msg + ' </small> </p>');
+                appendMsg('<p> <small> just sent: ' + printable_username + ' - ' + msg + ' </small> </p>');
 
                 mfield.value = '';
             }
@@ -148,14 +162,15 @@ const chat_page = `<html>
 
             let create_channel = function() {
                 let cfield = document.getElementById('channel');
-                channel = cfield.value;
+                let printable_channel = cfield.value;
+                channel = uni2b64(printable_channel);
 
                 let xhr = new XMLHttpRequest();
                 xhr.open("POST", '/new_channel/' + channel, true);
                 xhr.addEventListener("loadend", function (e) {
                     // 204 == No Content
                     if (e.target.status == 204) {
-                        appendMsg('<p> Channel "' + channel + '" created successfully! </p>');
+                        appendMsg('<p> Channel "' + printable_channel + '" created successfully! </p>');
                     }
                     else {
                         appendMsg('<p> Error: ' + e.target.response + '! </p>');
